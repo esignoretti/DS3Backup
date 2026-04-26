@@ -100,12 +100,15 @@ func (e *CryptoEngine) CompressAndEncrypt(content []byte) (*EncryptedFile, error
 		return nil, err
 	}
 
-	ciphertext := gcm.Seal(nonce, nonce, compressed, nil)
+	encryptedWithNonce := gcm.Seal(nonce, nonce, compressed, nil)
+	
+	encryptedData := encryptedWithNonce[gcm.NonceSize():len(encryptedWithNonce)-gcm.Overhead()]
+	tag := encryptedWithNonce[len(encryptedWithNonce)-gcm.Overhead():]
 
 	return &EncryptedFile{
 		Nonce:          nonce,
-		Ciphertext:     ciphertext[gcm.NonceSize():],
-		Tag:            ciphertext[len(ciphertext)-gcm.Overhead():],
+		Ciphertext:     encryptedData,
+		Tag:            tag,
 		OriginalHash:   hash[:],
 		OriginalSize:   int64(len(content)),
 		CompressedSize: int64(len(compressed)),
@@ -161,25 +164,23 @@ func (e *CryptoEngine) DecryptAndDecompress(encFile *EncryptedFile) ([]byte, err
 
 // Serialize converts EncryptedFile to bytes for storage
 func (e *EncryptedFile) Serialize() ([]byte, error) {
-	// Simple serialization: [nonce_len(2)][nonce][hash_len(2)][hash][orig_size(8)][comp_size(8)][ciphertext]
 	data := make([]byte, 0)
 	
-	// Nonce
 	data = append(data, byte(len(e.Nonce)))
 	data = append(data, e.Nonce...)
 	
-	// Hash
 	data = append(data, byte(len(e.OriginalHash)))
 	data = append(data, e.OriginalHash...)
 	
-	// Sizes
 	data = append(data, byte(e.OriginalSize>>56), byte(e.OriginalSize>>48), byte(e.OriginalSize>>40), byte(e.OriginalSize>>32))
 	data = append(data, byte(e.OriginalSize>>24), byte(e.OriginalSize>>16), byte(e.OriginalSize>>8), byte(e.OriginalSize))
 	
 	data = append(data, byte(e.CompressedSize>>56), byte(e.CompressedSize>>48), byte(e.CompressedSize>>40), byte(e.CompressedSize>>32))
 	data = append(data, byte(e.CompressedSize>>24), byte(e.CompressedSize>>16), byte(e.CompressedSize>>8), byte(e.CompressedSize))
 	
-	// Ciphertext
+	data = append(data, byte(len(e.Tag)))
+	data = append(data, e.Tag...)
+	
 	data = append(data, e.Ciphertext...)
 	
 	return data, nil
@@ -193,34 +194,35 @@ func DeserializeEncryptedFile(data []byte) (*EncryptedFile, error) {
 	
 	idx := 0
 	
-	// Nonce
 	nonceLen := int(data[idx])
 	idx++
 	nonce := data[idx : idx+nonceLen]
 	idx += nonceLen
 	
-	// Hash
 	hashLen := int(data[idx])
 	idx++
 	hash := data[idx : idx+hashLen]
 	idx += hashLen
 	
-	// Original size
 	origSize := int64(uint64(data[idx])<<56 | uint64(data[idx+1])<<48 | uint64(data[idx+2])<<40 | uint64(data[idx+3])<<32 |
 		uint64(data[idx+4])<<24 | uint64(data[idx+5])<<16 | uint64(data[idx+6])<<8 | uint64(data[idx+7]))
 	idx += 8
 	
-	// Compressed size
 	compSize := int64(uint64(data[idx])<<56 | uint64(data[idx+1])<<48 | uint64(data[idx+2])<<40 | uint64(data[idx+3])<<32 |
 		uint64(data[idx+4])<<24 | uint64(data[idx+5])<<16 | uint64(data[idx+6])<<8 | uint64(data[idx+7]))
 	idx += 8
 	
-	// Ciphertext
+	tagLen := int(data[idx])
+	idx++
+	tag := data[idx : idx+tagLen]
+	idx += tagLen
+	
 	ciphertext := data[idx:]
 	
 	return &EncryptedFile{
 		Nonce:          nonce,
 		Ciphertext:     ciphertext,
+		Tag:            tag,
 		OriginalHash:   hash,
 		OriginalSize:   origSize,
 		CompressedSize: compSize,

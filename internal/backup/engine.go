@@ -179,12 +179,25 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 			run.IndexSyncFailed = true
 		} else {
 			run.BatchesUploaded++
-			// Update S3 keys for files in this batch
+			// Update S3 keys and offsets for files in this batch
 			batchS3Key := fmt.Sprintf("backups/%s/batches/%s.enc", job.ID, manifest.BatchID)
+			
+			// Create a map from path to manifest file ref
+			fileRefMap := make(map[string]*models.BatchFileRef)
+			for i := range manifest.Files {
+				fileRefMap[manifest.Files[i].Path] = &manifest.Files[i]
+			}
+			
 			for i := range uniqueFiles {
 				if uniqueFiles[i].IsInBatch && uniqueFiles[i].S3Key == "" {
 					uniqueFiles[i].S3Key = batchS3Key
 					uniqueFiles[i].BatchID = manifest.BatchID
+					
+					// Get offset and length from manifest
+					if ref, ok := fileRefMap[uniqueFiles[i].Path]; ok {
+						uniqueFiles[i].OffsetInBatch = ref.OffsetInBatch
+						uniqueFiles[i].LengthInBatch = ref.LengthInBatch
+					}
 				}
 			}
 		}
