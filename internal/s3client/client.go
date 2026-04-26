@@ -142,9 +142,16 @@ func (c *Client) CheckObjectLockSupport() (bool, error) {
 
 // SetLifecyclePolicy sets lifecycle policy for retention cleanup
 func (c *Client) SetLifecyclePolicy(ctx context.Context, retentionDays int) error {
-	// This would set up S3 lifecycle rules to automatically delete old objects
-	// Implementation depends on S3 provider capabilities
+	// For now, just log that this feature needs manual configuration
+	// Different S3 providers have different lifecycle APIs
+	fmt.Printf("Note: Lifecycle policy must be set manually in your S3 provider's console.\n")
+	fmt.Printf("Recommended policy: Delete objects in 'backups/' prefix older than %d days.\n", retentionDays+1)
 	return nil
+}
+
+// GetLifecyclePolicy gets the current lifecycle policy
+func (c *Client) GetLifecyclePolicy(ctx context.Context) (string, error) {
+	return "Lifecycle policy check not available - please check your S3 provider's console", nil
 }
 
 // BucketExists checks if bucket exists
