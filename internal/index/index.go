@@ -135,61 +135,25 @@ func (db *IndexDB) SaveRun(run *models.BackupRun) error {
 // GetLastRun gets the last backup run for a job
 func (db *IndexDB) GetLastRun(jobID string) (*models.BackupRun, error) {
 	var lastRun *models.BackupRun
+	var found bool
 
 	err := db.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		opts.Prefix = runKey(jobID, time.Time{})
-		opts.Reverse = true
+		opts.Prefix = []byte(fmt.Sprintf("run:%s:", jobID))
+		opts.Reverse = false
 
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		it.Rewind()
-		if it.Valid() {
-			item := it.Item()
-			err := item.Value(func(val []byte) error {
-				lastRun = &models.BackupRun{}
-				return json.Unmarshal(val, lastRun)
-			})
-			if err != nil {
-				return err
-			}
-		} else {
-			return badger.ErrKeyNotFound
-		}
-
-		return nil
-	})
-
-	if err == badger.ErrKeyNotFound {
-		return nil, nil
-	}
-
-	return lastRun, err
-}
-
-// GetBackupHistory gets backup history for a job
-func (db *IndexDB) GetBackupHistory(jobID string, limit int) ([]*models.BackupRun, error) {
-	var runs []*models.BackupRun
-
-	err := db.db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.Prefix = runKey(jobID, time.Time{})
-		opts.Reverse = true
-
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		count := 0
-		for it.Rewind(); it.Valid() && count < limit; it.Next() {
+		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			err := item.Value(func(val []byte) error {
 				run := &models.BackupRun{}
 				if err := json.Unmarshal(val, run); err != nil {
 					return err
 				}
-				runs = append(runs, run)
-				count++
+				lastRun = run
+				found = true
 				return nil
 			})
 			if err != nil {
@@ -200,7 +164,60 @@ func (db *IndexDB) GetBackupHistory(jobID string, limit int) ([]*models.BackupRu
 		return nil
 	})
 
-	return runs, err
+	if err != nil {
+		return nil, err
+	}
+
+	if !found {
+		return nil, nil
+	}
+
+	return lastRun, nil
+}
+
+// GetBackupHistory gets backup history for a job
+func (db *IndexDB) GetBackupHistory(jobID string, limit int) ([]*models.BackupRun, error) {
+	var runs []*models.BackupRun
+
+	err := db.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(fmt.Sprintf("run:%s:", jobID))
+		opts.Reverse = false
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				run := &models.BackupRun{}
+				if err := json.Unmarshal(val, run); err != nil {
+					return err
+				}
+				runs = append(runs, run)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	for i, j := 0, len(runs)-1; i < j; i, j = i+1, j-1 {
+		runs[i], runs[j] = runs[j], runs[i]
+	}
+
+	if limit > 0 && len(runs) > limit {
+		runs = runs[:limit]
+	}
+
+	return runs, nil
 }
 
 // Backup backs up the database to a directory
