@@ -133,6 +133,16 @@ func (c *Config) GetJob(jobID string) *models.BackupJob {
 	return nil
 }
 
+// GetJobByName returns a job by name
+func (c *Config) GetJobByName(name string) *models.BackupJob {
+	for i := range c.Jobs {
+		if c.Jobs[i].Name == name {
+			return &c.Jobs[i]
+		}
+	}
+	return nil
+}
+
 // RemoveJob removes a job by ID
 func (c *Config) RemoveJob(jobID string) bool {
 	for i := range c.Jobs {

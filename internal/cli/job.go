@@ -70,13 +70,19 @@ Example:
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
+		// Get the job with generated ID
+		savedJob := cfg.GetJobByName(jobName)
+		if savedJob == nil {
+			return fmt.Errorf("failed to retrieve created job")
+		}
+
 		fmt.Printf("✓ Backup job created successfully!\n")
-		fmt.Printf("  Job ID: %s\n", job.ID)
-		fmt.Printf("  Name: %s\n", job.Name)
-		fmt.Printf("  Source: %s\n", job.SourcePath)
-		fmt.Printf("  Retention: %d days\n", job.RetentionDays)
-		fmt.Printf("  Object Lock: %s\n", job.ObjectLockMode)
-		fmt.Printf("\nRun backup with: ds3backup backup run %s\n", job.ID)
+		fmt.Printf("  Job ID: %s\n", savedJob.ID)
+		fmt.Printf("  Name: %s\n", savedJob.Name)
+		fmt.Printf("  Source: %s\n", savedJob.SourcePath)
+		fmt.Printf("  Retention: %d days\n", savedJob.RetentionDays)
+		fmt.Printf("  Object Lock: %s\n", savedJob.ObjectLockMode)
+		fmt.Printf("\nRun backup with: ds3backup backup run %s\n", savedJob.ID)
 
 		return nil
 	},
