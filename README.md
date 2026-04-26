@@ -1,6 +1,6 @@
 # DS3 Backup
 
-**Version:** 0.0.3
+**Version:** 0.0.4
 
 **DS3 Backup** is a secure, S3-only backup tool with client-side encryption, designed for simplicity and reliability.
 
@@ -115,6 +115,11 @@ ds3backup backup run <job-id> [--full] [--json]
 
 # View status
 ds3backup backup status <job-id>
+
+# View backup history
+ds3backup backup list <job-id>
+ds3backup backup list <job-id> --limit 50
+ds3backup backup list <job-id> --json
 ```
 
 ### Restore Operations
@@ -134,6 +139,18 @@ ds3backup restore run <job-id> --verify --password=YOUR_PASSWORD
 
 # Overwrite existing files during restore
 ds3backup restore run <job-id> --overwrite --password=YOUR_PASSWORD
+
+# Restore from specific point in time
+ds3backup restore run <job-id> --time="1h" --password=YOUR_PASSWORD
+ds3backup restore run <job-id> --time="2d" --password=YOUR_PASSWORD
+ds3backup restore run <job-id> --time="2024-04-26T10:30:00Z" --password=YOUR_PASSWORD
+
+# Restore with pattern filtering
+ds3backup restore run <job-id> --include="**/*.pdf" --password=YOUR_PASSWORD
+ds3backup restore run <job-id> --exclude="**/*.log" --password=YOUR_PASSWORD
+
+# JSON output for automation
+ds3backup restore run <job-id> --json --password=YOUR_PASSWORD
 ```
 
 **Restore Features:**
@@ -142,6 +159,10 @@ ds3backup restore run <job-id> --overwrite --password=YOUR_PASSWORD
 - Preserve file metadata (permissions, timestamps)
 - Hash verification (BLAKE2b-256) ensures integrity
 - Full path preservation when restoring to alternate location
+- Point-in-time restore from any backup run
+- Pattern filtering for selective restore
+- Real-time progress tracking with speed display
+- JSON output for programmatic usage
 
 ## Architecture
 
@@ -347,12 +368,42 @@ ds3backup index rebuild <job-id> --from-s3
 - One-click restore
 
 ### Phase 4: Restore
-- ✅ **Phase 4.1: MVP Restore** - Core restore functionality (latest backup, all files)
-- ⏳ Phase 4.2: Selective restore (pattern filtering)
-- ⏳ Phase 4.3: Point-in-time recovery
-- ⏳ Phase 4.4: Advanced features (parallel downloads optimization, resume)
+ - ✅ **Phase 4.1: MVP Restore** - Core restore functionality (latest backup, all files)
+ - ✅ **Phase 4.2: Selective restore** - Pattern filtering, progress tracking, enhanced output
+ - ✅ **Phase 4.3: Point-in-time recovery** - Restore from specific backup points
+ - ⏳ Phase 4.4: Advanced features (parallel downloads optimization, resume)
 
 ## Changelog
+
+### v0.0.4 (2026-04-26)
+**New Features:**
+- **Point-in-time restore** (Phase 4.3)
+  - `backup list <job-id>` - View backup history with timestamps, status, and statistics
+  - `restore run --time=<timestamp>` - Restore from specific backup point
+  - Support for absolute timestamps: `2024-04-26T10:30:00Z`, `2024-04-26 10:30:00`
+  - Support for relative times: `1h` (1 hour ago), `2d` (2 days ago), `1w` (1 week ago)
+  - Failed backup warning system
+  - Exact backup time matching with 1-second tolerance
+
+- **Advanced restore features** (Phase 4.2)
+  - Pattern filtering with `--include` and `--exclude` flags
+  - Progress tracking with real-time speed display (MB/s)
+  - Enhanced output with detailed statistics
+  - JSON output mode (`--json` flag)
+  - Improved error reporting with categorized failures
+  - Human-readable formatting (bytes, duration, speed)
+
+**CLI Enhancements:**
+- `backup list` command with table and JSON output
+- `--limit` flag for backup history pagination
+- `--password` flag for explicit password requirement
+- Better error messages with helpful suggestions
+
+**Technical:**
+- New `ProgressTracker` for restore operations
+- `GetRunByTime()` and `GetEntriesForRun()` index methods
+- Shared formatting utilities
+- Thread-safe progress updates
 
 ### v0.0.3 (2026-04-26)
 **New Features:**
