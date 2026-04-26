@@ -140,17 +140,17 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 				continue
 			}
 
-			entry.S3Key = s3Key
-			entry.IsInBatch = false
-			entry.CompressedSize = encrypted.CompressedSize
-			e.indexDB.SaveEntry(&entry)
+			// Update the entry in the slice (not the local copy)
+			uniqueFiles[i].S3Key = s3Key
+			uniqueFiles[i].IsInBatch = false
+			uniqueFiles[i].CompressedSize = encrypted.CompressedSize
 
 			run.FilesAdded++
 			run.BytesUploaded += entry.Size
 		} else {
 			// Small file: add to batch
-			entry.IsInBatch = true
-			entry.CompressedSize = encrypted.CompressedSize
+			uniqueFiles[i].IsInBatch = true
+			uniqueFiles[i].CompressedSize = encrypted.CompressedSize
 			
 			batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
 			

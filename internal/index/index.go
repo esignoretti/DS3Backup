@@ -249,3 +249,36 @@ func (db *IndexDB) Restore(backupDir string) error {
 
 	return db.db.Load(backupFile, 0)
 }
+
+// GetAllEntries gets all file entries for a job
+func (db *IndexDB) GetAllEntries(jobID string) ([]*models.FileEntry, error) {
+	var entries []*models.FileEntry
+
+	err := db.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(fmt.Sprintf("file:%s:", jobID))
+		opts.Reverse = false
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				entry := &models.FileEntry{}
+				if err := json.Unmarshal(val, entry); err != nil {
+					return err
+				}
+				entries = append(entries, entry)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	return entries, err
+}

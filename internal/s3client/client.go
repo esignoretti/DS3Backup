@@ -104,6 +104,46 @@ func (c *Client) GetObject(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
+// GetObjectWithProgress downloads an object with progress callback
+func (c *Client) GetObjectWithProgress(ctx context.Context, key string, progressCb func(downloaded, total int64)) ([]byte, error) {
+	obj, err := c.client.GetObject(ctx, c.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer obj.Close()
+
+	// Get object info for total size
+	info, err := obj.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	total := info.Size
+	var downloaded int64 = 0
+
+	data := make([]byte, 0, total)
+	buf := make([]byte, 32*1024) // 32KB buffer
+
+	for {
+		n, err := obj.Read(buf)
+		if n > 0 {
+			data = append(data, buf[:n]...)
+			downloaded += int64(n)
+			if progressCb != nil {
+				progressCb(downloaded, total)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return data, nil
+}
+
 // ListObjects lists objects with a given prefix
 func (c *Client) ListObjects(ctx context.Context, prefix string) ([]string, error) {
 	var objects []string

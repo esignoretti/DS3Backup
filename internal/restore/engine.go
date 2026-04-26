@@ -1,0 +1,299 @@
+package restore
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/esignoretti/ds3backup/internal/config"
+	"github.com/esignoretti/ds3backup/internal/crypto"
+	"github.com/esignoretti/ds3backup/internal/index"
+	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/pkg/models"
+	"golang.org/x/crypto/blake2b"
+)
+
+// RestoreEngine handles restore operations
+type RestoreEngine struct {
+	config    *config.Config
+	s3client  *s3client.Client
+	indexDB   *index.IndexDB
+	crypto    *crypto.CryptoEngine
+	extractor *BatchExtractor
+}
+
+// NewRestoreEngine creates a new restore engine
+func NewRestoreEngine(cfg *config.Config, s3 *s3client.Client, idx *index.IndexDB, cryptoEngine *crypto.CryptoEngine) *RestoreEngine {
+	return &RestoreEngine{
+		config:   cfg,
+		s3client: s3,
+		indexDB:  idx,
+		crypto:   cryptoEngine,
+	}
+}
+
+// Restore executes a restore operation
+func (e *RestoreEngine) Restore(jobID string, opts *models.RestoreOptions) (*models.RestoreResult, error) {
+	ctx := context.Background()
+	startTime := time.Now()
+
+	// Get all file entries from index
+	entries, err := e.indexDB.GetAllEntries(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file entries: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return &models.RestoreResult{}, nil
+	}
+
+	// Filter by patterns if specified
+	if len(opts.IncludePatterns) > 0 || len(opts.ExcludePatterns) > 0 {
+		entries = e.filterEntries(entries, opts)
+	}
+
+	// Initialize batch extractor
+	e.extractor = NewBatchExtractor(e.s3client, jobID)
+	defer e.extractor.ClearCache()
+
+	// Create downloader
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 8 // Default
+	}
+
+	downloader := NewDownloader(concurrency, e.s3client, e.crypto, e.extractor, ctx)
+	downloader.Start()
+
+	// Prepare jobs
+	var totalJobs int
+	var skippedFiles int
+
+	for _, entry := range entries {
+		// Determine destination path
+		destPath := e.getDestinationPath(entry, opts)
+
+		// Check if file exists (skip if not overwrite)
+		if !opts.Overwrite {
+			if _, err := os.Stat(destPath); err == nil {
+				skippedFiles++
+				continue
+			}
+		}
+
+		totalJobs++
+
+		// Submit job
+		job := &Job{
+			Entry:    entry,
+			DestPath: destPath,
+			IsBatch:  entry.IsInBatch,
+			BatchID:  entry.BatchID,
+		}
+		downloader.Submit(job)
+	}
+
+	// Collect results
+	result := &models.RestoreResult{
+		FilesSkipped: skippedFiles,
+		Warnings:     []string{},
+		Errors:       []string{},
+	}
+
+	processed := 0
+	for processed < totalJobs {
+		select {
+		case res := <-downloader.Results():
+			processed++
+			if res.Skipped {
+				result.FilesSkipped++
+			} else if res.Success {
+				result.FilesRestored++
+				result.BytesRestored += res.Bytes
+				result.Warnings = append(result.Warnings, res.Warnings...)
+			} else {
+				result.FilesFailed++
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+			}
+		case <-ctx.Done():
+			downloader.Stop()
+			return result, ctx.Err()
+		}
+	}
+
+	downloader.Stop()
+	result.Duration = int64(time.Since(startTime).Seconds())
+
+	return result, nil
+}
+
+// DryRun performs a dry-run restore (preview only)
+func (e *RestoreEngine) DryRun(jobID string, opts *models.RestoreOptions) (*models.DryRunResult, error) {
+	// Get all entries
+	entries, err := e.indexDB.GetAllEntries(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file entries: %w", err)
+	}
+
+	// Filter by patterns
+	if len(opts.IncludePatterns) > 0 || len(opts.ExcludePatterns) > 0 {
+		entries = e.filterEntries(entries, opts)
+	}
+
+	// Count existing files and calculate size
+	existingCount := 0
+	var totalSize int64
+	sampleFiles := make([]*models.FileEntry, 0, 20)
+
+	for i, entry := range entries {
+		destPath := e.getDestinationPath(entry, opts)
+
+		if _, err := os.Stat(destPath); err == nil {
+			existingCount++
+		}
+
+		totalSize += entry.Size
+
+		if i < 20 {
+			sampleFiles = append(sampleFiles, entry)
+		}
+	}
+
+	moreFiles := len(entries) - 20
+	if moreFiles < 0 {
+		moreFiles = 0
+	}
+
+	return &models.DryRunResult{
+		FilesToRestore: len(entries) - existingCount,
+		FilesSkipped:   existingCount,
+		TotalSize:      totalSize,
+		SampleFiles:    sampleFiles,
+		MoreFiles:      moreFiles,
+	}, nil
+}
+
+// Verify verifies backup integrity without restoring
+func (e *RestoreEngine) Verify(jobID string) (*models.VerifyResult, error) {
+	ctx := context.Background()
+
+	entries, err := e.indexDB.GetAllEntries(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file entries: %w", err)
+	}
+
+	result := &models.VerifyResult{
+		Total: len(entries),
+	}
+
+	for _, entry := range entries {
+		// Download
+		data, err := e.s3client.GetObject(ctx, entry.S3Key)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", entry.Path, err))
+			continue
+		}
+
+		// Deserialize
+		encFile, err := crypto.DeserializeEncryptedFile(data)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", entry.Path, err))
+			continue
+		}
+
+		// Decrypt & decompress
+		decrypted, err := e.crypto.DecryptAndDecompress(encFile)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", entry.Path, err))
+			continue
+		}
+
+		// Verify hash
+		hash := blake2b.Sum256(decrypted)
+		if string(hash[:]) != string(entry.Hash) {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: hash mismatch", entry.Path))
+			continue
+		}
+
+		result.Verified++
+	}
+
+	return result, nil
+}
+
+// filterEntries filters entries by include/exclude patterns
+func (e *RestoreEngine) filterEntries(entries []*models.FileEntry, opts *models.RestoreOptions) []*models.FileEntry {
+	filtered := make([]*models.FileEntry, 0, len(entries))
+
+	for _, entry := range entries {
+		include := true
+
+		// Check include patterns
+		if len(opts.IncludePatterns) > 0 {
+			include = false
+			for _, pattern := range opts.IncludePatterns {
+				if matchPattern(entry.Path, pattern) {
+					include = true
+					break
+				}
+			}
+		}
+
+		// Check exclude patterns
+		if len(opts.ExcludePatterns) > 0 {
+			for _, pattern := range opts.ExcludePatterns {
+				if matchPattern(entry.Path, pattern) {
+					include = false
+					break
+				}
+			}
+		}
+
+		if include {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	return filtered
+}
+
+// getDestinationPath determines the destination path for a file
+func (e *RestoreEngine) getDestinationPath(entry *models.FileEntry, opts *models.RestoreOptions) string {
+	if opts.DestinationPath == "" {
+		// Restore to original path
+		return entry.Path
+	}
+
+	// Restore to alternate location, preserving full path structure
+	// /Users/docs/file.pdf → /tmp/restore/Users/docs/file.pdf
+	return filepath.Join(opts.DestinationPath, entry.Path)
+}
+
+// matchPattern checks if a path matches a glob pattern
+func matchPattern(path, pattern string) bool {
+	matched, err := filepath.Match(pattern, path)
+	if err != nil {
+		return false
+	}
+	if matched {
+		return true
+	}
+
+	// Try with ** pattern (recursive match)
+	if strings.Contains(pattern, "**") {
+		// Convert ** to regex-like matching
+		pattern = strings.Replace(pattern, "**/", "(**/)?", -1)
+		pattern = strings.Replace(pattern, "**", "*", -1)
+		matched, _ = filepath.Match(pattern, path)
+		return matched
+	}
+
+	return false
+}
