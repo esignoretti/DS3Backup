@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/esignoretti/ds3backup/internal/backup"
+	"github.com/esignoretti/ds3backup/internal/config"
 	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
@@ -78,12 +79,15 @@ Example:
 			return fmt.Errorf("failed to create crypto engine: %w", err)
 		}
 
-		// Create index DB
-		indexDir := filepath.Join(os.TempDir(), "ds3backup-index-"+jobID)
+		// Create index DB in persistent location
+		configDir, err := config.ConfigDir()
+		if err != nil {
+			return fmt.Errorf("failed to get config directory: %w", err)
+		}
+		indexDir := filepath.Join(configDir, "index", jobID)
 		if err := os.MkdirAll(indexDir, 0700); err != nil {
 			return err
 		}
-		defer os.RemoveAll(indexDir)
 
 		indexDB, err := index.OpenIndexDB(indexDir)
 		if err != nil {

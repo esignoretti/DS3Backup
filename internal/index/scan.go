@@ -2,7 +2,6 @@ package index
 
 import (
 	"crypto/md5"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -70,41 +69,31 @@ func (db *IndexDB) ScanDirectory(rootPath, jobID string) (*ScanResult, error) {
 	return result, err
 }
 
-// GetChangedFiles returns files that have changed since a given time
-func (db *IndexDB) GetChangedFiles(jobID string, since time.Time) ([]models.FileEntry, error) {
+// GetChangedFiles compares current files with indexed files and returns changed ones
+func (db *IndexDB) GetChangedFiles(currentFiles []models.FileEntry, jobID string) ([]models.FileEntry, error) {
 	var changed []models.FileEntry
 
-	err := db.db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.Prefix = []byte(fmt.Sprintf("file:%s:", jobID))
-
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-			err := item.Value(func(val []byte) error {
-				entry := &models.FileEntry{}
-				if err := json.Unmarshal(val, entry); err != nil {
-					return err
-				}
-
-				// Check if file has changed since last backup
-				if entry.ModTime.After(since) {
-					changed = append(changed, *entry)
-				}
-
-				return nil
-			})
-			if err != nil {
-				return err
-			}
+	for _, current := range currentFiles {
+		// Get previous entry from index
+		prev, err := db.GetEntry(jobID, current.Path)
+		if err != nil && err != badger.ErrKeyNotFound {
+			return nil, err
 		}
 
-		return nil
-	})
+		// If file doesn't exist in index, it's new
+		if prev == nil {
+			changed = append(changed, current)
+			continue
+		}
 
-	return changed, err
+		// Check if file has changed (ModTime or size)
+		if current.ModTime.After(prev.ModTime) || current.Size != prev.Size {
+			changed = append(changed, current)
+		}
+		// If ModTime and Size are the same, file hasn't changed - skip it
+	}
+
+	return changed, nil
 }
 
 // GetUniqueFilesToBackup filters out duplicate files (by hash)

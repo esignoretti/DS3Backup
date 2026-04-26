@@ -76,11 +76,18 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	entries := scanResult.Files
 	if !fullBackup && job.LastRun != nil {
 		log.Println("Filtering changed files...")
-		entries, err = e.indexDB.GetChangedFiles(job.ID, *job.LastRun)
+		changedEntries, err := e.indexDB.GetChangedFiles(scanResult.Files, job.ID)
 		if err != nil {
 			return run, err
 		}
+		entries = changedEntries
+		run.FilesChanged = len(entries)
 		log.Printf("Changed files: %d", len(entries))
+	} else {
+		log.Printf("Full backup or first run, processing all %d files", len(entries))
+		if job.LastRun == nil {
+			run.FilesChanged = len(entries) // First run = all files are "changed"
+		}
 	}
 
 	// Step 3: Deduplication
@@ -142,19 +149,14 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 			run.BytesUploaded += entry.Size
 		} else {
 			// Small file: add to batch
-			ready, _ := batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
-
-			if ready {
-				// Upload completed batch
-				_, err := batchBuilder.Upload(ctx, e.s3client)
-				if err != nil {
-					log.Printf("WARNING: Batch upload failed: %v", err)
-					run.IndexSyncFailed = true
-				} else {
-					run.BatchesUploaded++
-				}
-				batchBuilder = s3client.NewBatchBuilder(s3client.DefaultBatchConfig, job.ID)
-			}
+			entry.IsInBatch = true
+			entry.CompressedSize = encrypted.CompressedSize
+			
+			batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
+			
+			// Count batched files as added (will be uploaded with batch)
+			run.FilesAdded++
+			run.BytesUploaded += entry.Size
 		}
 
 		// Progress callback
@@ -171,12 +173,28 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 
 	// Step 5: Upload remaining batch
 	if batchBuilder.FileCount() > 0 {
-		_, err := batchBuilder.Upload(ctx, e.s3client)
+		manifest, err := batchBuilder.Upload(ctx, e.s3client)
 		if err != nil {
 			log.Printf("WARNING: Final batch upload failed: %v", err)
 			run.IndexSyncFailed = true
 		} else {
 			run.BatchesUploaded++
+			// Update S3 keys for files in this batch
+			batchS3Key := fmt.Sprintf("backups/%s/batches/%s.enc", job.ID, manifest.BatchID)
+			for i := range uniqueFiles {
+				if uniqueFiles[i].IsInBatch && uniqueFiles[i].S3Key == "" {
+					uniqueFiles[i].S3Key = batchS3Key
+					uniqueFiles[i].BatchID = manifest.BatchID
+				}
+			}
+		}
+	}
+	
+	// Save ALL entries to index (both large files and batched files)
+	log.Printf("Saving %d entries to index...", len(uniqueFiles))
+	for i := range uniqueFiles {
+		if err := e.indexDB.SaveEntry(&uniqueFiles[i]); err != nil {
+			log.Printf("WARNING: Failed to save index entry for %s: %v", uniqueFiles[i].Path, err)
 		}
 	}
 
