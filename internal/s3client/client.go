@@ -65,6 +65,11 @@ func (c *Client) PutObject(ctx context.Context, key string, data []byte) error {
 
 // PutObjectWithLock uploads an object with Object Lock
 func (c *Client) PutObjectWithLock(ctx context.Context, key string, data []byte, mode string, retentionDays int) error {
+	// If mode is NONE, upload without object lock
+	if mode == "NONE" {
+		return c.PutObject(ctx, key, data)
+	}
+	
 	if !c.objectLock {
 		// Fall back to regular upload if object lock not supported
 		return c.PutObject(ctx, key, data)
@@ -74,8 +79,8 @@ func (c *Client) PutObjectWithLock(ctx context.Context, key string, data []byte,
 	retentionUntil := time.Now().AddDate(0, 0, retentionDays+1) // +1 day buffer
 
 	opts := minio.PutObjectOptions{
-		ContentType:    "application/octet-stream",
-		Mode:           minio.Governance,
+		ContentType:     "application/octet-stream",
+		Mode:            minio.Governance,
 		RetainUntilDate: retentionUntil,
 	}
 

@@ -44,7 +44,7 @@ type EncryptionConfig struct {
 // ObjectLockConfig holds Object Lock settings
 type ObjectLockConfig struct {
 	Enabled            bool   `json:"enabled"`
-	Mode               string `json:"mode"` // "GOVERNANCE" or "COMPLIANCE"
+	Mode               string `json:"mode"` // "GOVERNANCE", "COMPLIANCE", or "NONE"
 	DefaultRetentionDays int   `json:"defaultRetentionDays"`
 }
 

@@ -29,8 +29,8 @@ This command will:
 			return fmt.Errorf("missing required parameters:\n  --endpoint, --bucket, --access-key, --secret-key, --password are required")
 		}
 
-		if objectLock != "GOVERNANCE" && objectLock != "COMPLIANCE" {
-			return fmt.Errorf("invalid object lock mode: %s (must be GOVERNANCE or COMPLIANCE)", objectLock)
+		if objectLock != "GOVERNANCE" && objectLock != "COMPLIANCE" && objectLock != "NONE" {
+			return fmt.Errorf("invalid object lock mode: %s (must be GOVERNANCE, COMPLIANCE, or NONE)", objectLock)
 		}
 
 		// Create S3 config
@@ -55,9 +55,9 @@ This command will:
 		objectLockSupported, err := client.CheckObjectLockSupport()
 		if err != nil {
 			log.Printf("Warning: Could not check Object Lock support: %v", err)
-		} else if !objectLockSupported {
-			log.Printf("Warning: Bucket does not support Object Lock")
-		} else {
+		} else if !objectLockSupported && objectLock != "NONE" {
+			log.Printf("Warning: Bucket does not support Object Lock, but object lock mode is set to %s", objectLock)
+		} else if objectLockSupported {
 			fmt.Println("✓ Object Lock supported")
 		}
 
@@ -110,7 +110,7 @@ func init() {
 	initCmd.Flags().StringVar(&secretKey, "secret-key", "", "S3 secret key")
 	initCmd.Flags().StringVar(&region, "region", "us-east-1", "S3 region")
 	initCmd.Flags().StringVar(&password, "password", "", "Encryption password")
-	initCmd.Flags().StringVar(&objectLock, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE or COMPLIANCE)")
+	initCmd.Flags().StringVar(&objectLock, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
 	initCmd.Flags().IntVar(&retentionDays, "retention-days", 30, "Default retention period in days")
 
 	initCmd.MarkFlagRequired("endpoint")

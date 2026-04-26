@@ -50,8 +50,8 @@ Example:
 		}
 
 		// Validate lock mode
-		if jobLockMode != "GOVERNANCE" && jobLockMode != "COMPLIANCE" {
-			return fmt.Errorf("invalid lock mode: %s", jobLockMode)
+		if jobLockMode != "GOVERNANCE" && jobLockMode != "COMPLIANCE" && jobLockMode != "NONE" {
+			return fmt.Errorf("invalid lock mode: %s (must be GOVERNANCE, COMPLIANCE, or NONE)", jobLockMode)
 		}
 
 		// Create job
@@ -151,7 +151,7 @@ func init() {
 	jobAddCmd.Flags().StringVarP(&jobName, "name", "n", "", "Job name")
 	jobAddCmd.Flags().StringVarP(&jobPath, "path", "p", "", "Directory path to backup")
 	jobAddCmd.Flags().IntVarP(&jobRetention, "retention", "r", 30, "Retention period in days")
-	jobAddCmd.Flags().StringVar(&jobLockMode, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE or COMPLIANCE)")
+	jobAddCmd.Flags().StringVar(&jobLockMode, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
 
 	jobAddCmd.MarkFlagRequired("name")
 	jobAddCmd.MarkFlagRequired("path")
