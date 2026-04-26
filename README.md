@@ -1,5 +1,7 @@
 # DS3 Backup
 
+**Version:** 0.0.2
+
 **DS3 Backup** is a secure, S3-only backup tool with client-side encryption, designed for simplicity and reliability.
 
 ## Features
@@ -300,6 +302,18 @@ ds3backup index rebuild <job-id> --from-s3
 - System tray integration
 - Automatic backup execution
 
+### Phase 1.2: Management Commands ✅ (Current)
+- `config show` - Display current configuration
+- `config validate` - Validate configuration and S3 connection
+- `config reset` - Reset configuration with optional S3 wipe
+- `index show` - Display index statistics for a job
+- `index rebuild` - Rebuild local index from S3
+- `index clear` - Clear local index
+- `s3 check-object-lock` - Check if bucket supports Object Lock
+- `s3 lifecycle-set` - Set S3 lifecycle policy
+- `s3 lifecycle-get` - Get current lifecycle policy
+- `s3 ls` - List objects in S3 bucket
+
 ### Phase 3: Desktop UI
 - Cross-platform system tray app
 - Progress notifications
@@ -311,6 +325,27 @@ ds3backup index rebuild <job-id> --from-s3
 - Point-in-time recovery
 - Browse backup history
 - Selective restore
+
+## Changelog
+
+### v0.0.2 (2026-04-26)
+**Bug Fixes:**
+- Fixed `index show` command not displaying backup runs (BadgerDB v4 Reverse+Prefix iterator bug)
+- Fixed prefix matching in GetBackupHistory and GetLastRun functions
+
+**Improvements:**
+- Better error handling in index operations
+- More descriptive error messages
+
+### v0.0.1 (2026-04-26)
+**Initial Release:**
+- Core backup functionality with incremental backups
+- Client-side AES-256-GCM encryption with Argon2id key derivation
+- S3 Object Lock support (GOVERNANCE, COMPLIANCE, NONE modes)
+- BadgerDB local index with S3 sync
+- File batching for S3 cost optimization
+- Deduplication and compression (zstd)
+- CLI commands: init, job add/list/delete, backup run/status
 
 ## Security Considerations
 
