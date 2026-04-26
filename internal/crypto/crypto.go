@@ -100,14 +100,18 @@ func (e *CryptoEngine) CompressAndEncrypt(content []byte) (*EncryptedFile, error
 		return nil, err
 	}
 
-	encryptedWithNonce := gcm.Seal(nonce, nonce, compressed, nil)
+	encryptedData := gcm.Seal(nonce, nonce, compressed, nil)
 	
-	encryptedData := encryptedWithNonce[gcm.NonceSize():len(encryptedWithNonce)-gcm.Overhead()]
-	tag := encryptedWithNonce[len(encryptedWithNonce)-gcm.Overhead():]
+	// Extract components with explicit copies to avoid slice sharing
+	ciphertext := make([]byte, len(encryptedData)-gcm.NonceSize()-gcm.Overhead())
+	copy(ciphertext, encryptedData[gcm.NonceSize():len(encryptedData)-gcm.Overhead()])
+	
+	tag := make([]byte, gcm.Overhead())
+	copy(tag, encryptedData[len(encryptedData)-gcm.Overhead():])
 
 	return &EncryptedFile{
 		Nonce:          nonce,
-		Ciphertext:     encryptedData,
+		Ciphertext:     ciphertext,
 		Tag:            tag,
 		OriginalHash:   hash[:],
 		OriginalSize:   int64(len(content)),
@@ -131,8 +135,10 @@ func (e *CryptoEngine) DecryptAndDecompress(encFile *EncryptedFile) ([]byte, err
 		return nil, err
 	}
 
-	// Prepend nonce to ciphertext
-	ciphertext := append(encFile.Nonce, encFile.Ciphertext...)
+	// Reconstruct: nonce + ciphertext + tag
+	ciphertext := make([]byte, 0, len(encFile.Nonce)+len(encFile.Ciphertext)+len(encFile.Tag))
+	ciphertext = append(ciphertext, encFile.Nonce...)
+	ciphertext = append(ciphertext, encFile.Ciphertext...)
 	ciphertext = append(ciphertext, encFile.Tag...)
 
 	// 3. Decrypt
