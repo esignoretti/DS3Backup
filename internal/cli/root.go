@@ -23,8 +23,9 @@ var (
 
 // rootCmd represents the base command
 var rootCmd = &cobra.Command{
-	Use:   "ds3backup",
-	Short: "DS3 Backup - Secure S3 backup tool",
+	Use:     "ds3backup",
+	Short:   "DS3 Backup - Secure S3 backup tool",
+	Version: Version,
 	Long: `DS3 Backup is a secure, S3-only backup tool with client-side encryption.
 
 Features:
