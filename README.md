@@ -1,6 +1,6 @@
 # DS3 Backup
 
-**Version:** 0.0.2
+**Version:** 0.0.3
 
 **DS3 Backup** is a secure, S3-only backup tool with client-side encryption, designed for simplicity and reliability.
 
@@ -116,6 +116,32 @@ ds3backup backup run <job-id> [--full] [--json]
 # View status
 ds3backup backup status <job-id>
 ```
+
+### Restore Operations
+
+```bash
+# Restore all files from latest backup
+ds3backup restore run <job-id> --password=YOUR_PASSWORD
+
+# Restore to alternate location (preserves full path structure)
+ds3backup restore run <job-id> --to=/tmp/restore --password=YOUR_PASSWORD
+
+# Preview restore (dry-run)
+ds3backup restore run <job-id> --dry-run
+
+# Verify backup integrity (download, decrypt, verify hash)
+ds3backup restore run <job-id> --verify --password=YOUR_PASSWORD
+
+# Overwrite existing files during restore
+ds3backup restore run <job-id> --overwrite --password=YOUR_PASSWORD
+```
+
+**Restore Features:**
+- 8 parallel downloads for fast restoration
+- Skip existing files by default (safe)
+- Preserve file metadata (permissions, timestamps)
+- Hash verification (BLAKE2b-256) ensures integrity
+- Full path preservation when restoring to alternate location
 
 ## Architecture
 
@@ -321,12 +347,29 @@ ds3backup index rebuild <job-id> --from-s3
 - One-click restore
 
 ### Phase 4: Restore
-- File/directory restore
-- Point-in-time recovery
-- Browse backup history
-- Selective restore
+- ✅ **Phase 4.1: MVP Restore** - Core restore functionality (latest backup, all files)
+- ⏳ Phase 4.2: Selective restore (pattern filtering)
+- ⏳ Phase 4.3: Point-in-time recovery
+- ⏳ Phase 4.4: Advanced features (parallel downloads optimization, resume)
 
 ## Changelog
+
+### v0.0.3 (2026-04-26)
+**New Features:**
+- **Restore functionality** (Phase 4.1 MVP)
+  - `restore run` - Restore all files from latest backup
+  - `--to` flag - Restore to alternate location
+  - `--dry-run` - Preview restore without downloading
+  - `--verify` - Verify backup integrity
+  - `--overwrite` - Overwrite existing files
+  - 8 parallel download workers
+  - Batch caching (download once, extract multiple files)
+  - Metadata preservation (permissions, timestamps)
+  - Hash verification (BLAKE2b-256)
+
+**Bug Fixes:**
+- Fixed backup engine not saving S3Key for files (entries were saved before S3 keys were set)
+- Fixed index entries not including S3 location information
 
 ### v0.0.2 (2026-04-26)
 **Bug Fixes:**
