@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,6 +27,7 @@ var (
 	restoreExclude    []string
 	restoreJSON       bool
 	restorePassword   string
+	restoreTime       string
 )
 
 // restoreCmd represents the restore command
@@ -123,12 +126,60 @@ var restoreRunCmd = &cobra.Command{
 			return runVerify(engine, jobID)
 		}
 
+		// Handle point-in-time restore
+		if restoreTime != "" {
+			return runRestoreWithTime(engine, jobID, indexDB, opts)
+		}
+
 		if restoreDryRun {
 			return runDryRun(engine, jobID, opts)
 		}
 
 		return runRestore(engine, jobID, opts)
 	},
+}
+
+// runRestoreWithTime handles restore from a specific point in time
+func runRestoreWithTime(engine *restore.RestoreEngine, jobID string, indexDB *index.IndexDB, opts *models.RestoreOptions) error {
+	// Parse time string
+	targetTime, err := parseTime(restoreTime)
+	if err != nil {
+		return err
+	}
+
+	// Find backup run at that time
+	targetRun, err := indexDB.GetRunByTime(jobID, targetTime)
+	if err != nil {
+		return fmt.Errorf("failed to find backup at specified time: %w", err)
+	}
+	if targetRun == nil {
+		return fmt.Errorf("no backup found at or before %s\nRun 'ds3backup backup list %s' to see available backups", restoreTime, jobID)
+	}
+
+	// Warn if backup failed
+	if targetRun.Status == "failed" {
+		fmt.Printf("⚠️  Warning: selected backup run failed (status: %s)\n", targetRun.Status)
+		fmt.Println("   Restore may be incomplete.")
+		fmt.Println()
+	}
+
+	fmt.Printf("📅 Restoring from backup: %s\n", targetRun.RunTime.Format("2006-01-02 15:04:05"))
+	fmt.Println()
+
+	// Get entries for that specific run
+	entries, err := indexDB.GetEntriesForRun(jobID, targetRun.RunTime)
+	if err != nil {
+		return fmt.Errorf("failed to get entries for specified backup: %w", err)
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("no files found in backup at %s", targetRun.RunTime.Format("2006-01-02 15:04:05"))
+	}
+
+	if opts.DryRun {
+		return runDryRunWithEntries(engine, jobID, opts, entries)
+	}
+
+	return runRestoreWithEntries(engine, jobID, opts, entries)
 }
 
 func runVerify(engine *restore.RestoreEngine, jobID string) error {
@@ -186,7 +237,7 @@ func runDryRun(engine *restore.RestoreEngine, jobID string, opts *models.Restore
 
 	fmt.Printf("Files to restore: %d\n", result.FilesToRestore)
 	fmt.Printf("Files to skip (already exist): %d\n", result.FilesSkipped)
-	fmt.Printf("Total size: %s\n", restore.FormatBytes(result.TotalSize))
+	fmt.Printf("Total size: %s\n", formatBytes(result.TotalSize))
 	
 	// Estimate time (rough estimate at 10 MB/s)
 	estimatedSeconds := float64(result.TotalSize) / 10 / 1024 / 1024
@@ -200,11 +251,58 @@ func runDryRun(engine *restore.RestoreEngine, jobID string, opts *models.Restore
 	if len(result.SampleFiles) > 0 {
 		fmt.Println("Sample files:")
 		for _, f := range result.SampleFiles {
-			fmt.Printf("  - %s (%s)\n", f.Path, restore.FormatBytes(f.Size))
+			fmt.Printf("  - %s (%s)\n", f.Path, formatBytes(f.Size))
 		}
 		if result.MoreFiles > 0 {
 			fmt.Printf("  ... (%d more files)\n", result.MoreFiles)
 		}
+	}
+
+	return nil
+}
+
+func runDryRunWithEntries(engine *restore.RestoreEngine, jobID string, opts *models.RestoreOptions, entries []*models.FileEntry) error {
+	fmt.Println("📋 Restore Preview (Dry Run)")
+	fmt.Println()
+
+	// Calculate statistics
+	var filesToRestore int
+	var filesToSkip int
+	var totalSize int64
+
+	for _, entry := range entries {
+		destPath := filepath.Join(opts.DestinationPath, entry.Path)
+		if _, err := os.Stat(destPath); err == nil && !opts.Overwrite {
+			filesToSkip++
+		} else {
+			filesToRestore++
+			totalSize += entry.Size
+		}
+	}
+
+	fmt.Printf("Files to restore: %d\n", filesToRestore)
+	fmt.Printf("Files to skip (already exist): %d\n", filesToSkip)
+	fmt.Printf("Total size: %s\n", formatBytes(totalSize))
+	
+	// Estimate time
+	estimatedSeconds := float64(totalSize) / 10 / 1024 / 1024
+	if estimatedSeconds < 60 {
+		fmt.Printf("Estimated time: ~%.0f seconds\n", estimatedSeconds)
+	} else {
+		fmt.Printf("Estimated time: ~%.1f minutes\n", estimatedSeconds/60)
+	}
+	fmt.Println()
+
+	// Show sample files
+	maxSamples := 20
+	sampleCount := 0
+	for _, entry := range entries {
+		if sampleCount >= maxSamples {
+			fmt.Printf("  ... (%d more files)\n", len(entries)-sampleCount)
+			break
+		}
+		fmt.Printf("  - %s (%s)\n", entry.Path, formatBytes(entry.Size))
+		sampleCount++
 	}
 
 	return nil
@@ -238,6 +336,27 @@ func runRestore(engine *restore.RestoreEngine, jobID string, opts *models.Restor
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
+	return displayRestoreResult(result)
+}
+
+func runRestoreWithEntries(engine *restore.RestoreEngine, jobID string, opts *models.RestoreOptions, entries []*models.FileEntry) error {
+	fmt.Println("🔄 Restoring files...")
+	fmt.Println()
+
+	totalFiles := len(entries)
+	
+	// Create progress tracker
+	tracker := restore.NewProgressTracker(totalFiles)
+
+	result, err := engine.RestoreEntries(jobID, opts, tracker, entries)
+	if err != nil {
+		return fmt.Errorf("restore failed: %w", err)
+	}
+
+	return displayRestoreResult(result)
+}
+
+func displayRestoreResult(result *models.RestoreResult) error {
 	if restoreJSON {
 		output, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(output))
@@ -251,7 +370,7 @@ func runRestore(engine *restore.RestoreEngine, jobID string, opts *models.Restor
 	if result.FilesFailed > 0 {
 		fmt.Printf("   Files failed: %d\n", result.FilesFailed)
 	}
-	fmt.Printf("   Bytes restored: %s\n", restore.FormatBytes(result.BytesRestored))
+	fmt.Printf("   Bytes restored: %s\n", formatBytes(result.BytesRestored))
 	fmt.Printf("   Duration: %s\n", formatDuration(time.Duration(result.Duration)*time.Second))
 
 	if len(result.Warnings) > 0 {
@@ -282,14 +401,62 @@ func runRestore(engine *restore.RestoreEngine, jobID string, opts *models.Restor
 	return nil
 }
 
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
+// parseTime parses absolute timestamps and relative time expressions
+func parseTime(timeStr string) (time.Time, error) {
+	// Try relative time first (e.g., 1h, 2d, 1w)
+	if relativePattern.MatchString(timeStr) {
+		return parseRelativeTime(timeStr)
 	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%dm %ds", minutes, seconds)
+
+	// Try absolute time formats
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			// If no timezone specified, treat as UTC
+			if format == "2006-01-02 15:04:05" || format == "2006-01-02" {
+				return t.UTC(), nil
+			}
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("invalid time format '%s'\nSupported formats: 2024-04-26T10:30:00Z, 2024-04-26 10:30:00, 1h, 2d, 1w", timeStr)
 }
+
+// parseRelativeTime parses relative time expressions like 1h, 2d, 1w
+func parseRelativeTime(timeStr string) (time.Time, error) {
+	matches := relativePattern.FindStringSubmatch(timeStr)
+	if len(matches) != 3 {
+		return time.Time{}, fmt.Errorf("invalid relative time format")
+	}
+
+	n, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	unit := matches[2]
+	now := time.Now()
+
+	switch unit {
+	case "h":
+		return now.Add(-time.Duration(n) * time.Hour), nil
+	case "d":
+		return now.Add(-time.Duration(n) * 24 * time.Hour), nil
+	case "w":
+		return now.Add(-time.Duration(n) * 7 * 24 * time.Hour), nil
+	default:
+		return time.Time{}, fmt.Errorf("unknown time unit: %s", unit)
+	}
+}
+
+var relativePattern = regexp.MustCompile(`^(\d+)([hdw])$`)
 
 func init() {
 	rootCmd.AddCommand(restoreCmd)
@@ -302,5 +469,6 @@ func init() {
 	restoreRunCmd.Flags().StringSliceVar(&restoreInclude, "include", nil, "Include files matching pattern (e.g., \"**/*.pdf\")")
 	restoreRunCmd.Flags().StringSliceVar(&restoreExclude, "exclude", nil, "Exclude files matching pattern")
 	restoreRunCmd.Flags().StringVar(&restorePassword, "password", "", "Encryption password (required for restore)")
+	restoreRunCmd.Flags().StringVar(&restoreTime, "time", "", "Restore from specific time (e.g., '2024-04-26T10:30:00Z', '1d', '2h')")
 	restoreRunCmd.Flags().BoolVar(&restoreJSON, "json", false, "JSON output")
 }

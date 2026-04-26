@@ -389,3 +389,102 @@ func (e *RestoreEngine) RestoreWithProgress(jobID string, opts *models.RestoreOp
 
 	return result, nil
 }
+
+// RestoreEntries restores specific file entries with progress tracking
+func (e *RestoreEngine) RestoreEntries(jobID string, opts *models.RestoreOptions, tracker *ProgressTracker, entries []*models.FileEntry) (*models.RestoreResult, error) {
+	if len(entries) == 0 {
+		return &models.RestoreResult{}, nil
+	}
+
+	// Prepare restore lists
+	var filesToRestore []*models.FileEntry
+	var filesToSkip []string
+
+	if !opts.Overwrite && opts.DestinationPath == "" {
+		// Check which files already exist
+		for _, entry := range entries {
+			destPath := e.getDestinationPath(entry, opts)
+			if _, err := os.Stat(destPath); err == nil {
+				filesToSkip = append(filesToSkip, destPath)
+			} else {
+				filesToRestore = append(filesToRestore, entry)
+			}
+		}
+	} else {
+		filesToRestore = entries
+	}
+
+	// Calculate total size
+	var totalSize int64
+	for _, entry := range filesToRestore {
+		totalSize += entry.Size
+	}
+
+	if opts.DryRun {
+		return &models.RestoreResult{
+			FilesRestored: 0,
+			FilesSkipped:  len(filesToSkip),
+			BytesRestored: 0,
+		}, nil
+	}
+
+	// Create context
+	ctx := context.Background()
+
+	// Create downloader
+	downloader := NewDownloader(opts.Concurrency, e.s3client, e.crypto, e.extractor, ctx)
+	downloader.Start()
+
+	// Result tracking
+	result := &models.RestoreResult{
+		FilesRestored: 0,
+		FilesSkipped:  len(filesToSkip),
+		BytesRestored: 0,
+		Warnings:      []string{},
+		Errors:        []string{},
+	}
+
+	var mu sync.Mutex
+
+	// Submit jobs
+	for _, entry := range filesToRestore {
+		destPath := e.getDestinationPath(entry, opts)
+		job := &Job{
+			Entry:    entry,
+			DestPath: destPath,
+			IsBatch:  entry.IsInBatch,
+			BatchID:  entry.BatchID,
+		}
+		downloader.Submit(job)
+	}
+
+	downloader.Stop()
+
+	// Collect results
+	for res := range downloader.Results() {
+		if res.Skipped {
+			mu.Lock()
+			result.FilesSkipped++
+			mu.Unlock()
+			tracker.Update(res.Entry.Path, res.Bytes, true)
+		} else if res.Success {
+			mu.Lock()
+			result.FilesRestored++
+			result.BytesRestored += res.Bytes
+			if len(res.Warnings) > 0 {
+				result.Warnings = append(result.Warnings, res.Warnings...)
+			}
+			mu.Unlock()
+			tracker.Update(res.Entry.Path, res.Bytes, false)
+		} else {
+			mu.Lock()
+			result.FilesFailed++
+			if res.Error != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+			}
+			mu.Unlock()
+		}
+	}
+
+	return result, nil
+}

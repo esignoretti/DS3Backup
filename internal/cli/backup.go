@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,6 +15,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
 var (
@@ -160,20 +163,6 @@ Example:
 	},
 }
 
-// formatBytes formats bytes as human-readable string
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
 // backupStatusCmd represents the backup status command
 var backupStatusCmd = &cobra.Command{
 	Use:   "status <job-id>",
@@ -219,4 +208,119 @@ func init() {
 
 	backupRunCmd.Flags().BoolVar(&fullBackup, "full", false, "Force full backup")
 	backupRunCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+}
+
+var (
+	backupListLimit int
+	backupListJSON  bool
+)
+
+// backupListCmd represents the backup list command
+var backupListCmd = &cobra.Command{
+	Use:   "list <job-id>",
+	Short: "List backup history for a job",
+	Long:  `Show all backup runs for a specific job with timestamps, status, and statistics.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jobID := args[0]
+
+		// Load config
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+
+		// Find job
+		job := cfg.GetJob(jobID)
+		if job == nil {
+			return fmt.Errorf("job not found: %s", jobID)
+		}
+
+		// Open index DB
+		configDir, err := config.ConfigDir()
+		if err != nil {
+			return fmt.Errorf("failed to get config directory: %w", err)
+		}
+		indexDir := filepath.Join(configDir, "index", jobID)
+		if err := os.MkdirAll(indexDir, 0700); err != nil {
+			return err
+		}
+
+		indexDB, err := index.OpenIndexDB(indexDir)
+		if err != nil {
+			return fmt.Errorf("failed to open index: %w", err)
+		}
+		defer indexDB.Close()
+
+		// Get backup history
+		runs, err := indexDB.GetBackupHistory(jobID, backupListLimit)
+		if err != nil {
+			return fmt.Errorf("failed to get backup history: %w", err)
+		}
+
+		if len(runs) == 0 {
+			if backupListJSON {
+				fmt.Println("[]")
+			} else {
+				fmt.Println("No backup runs found for this job.")
+			}
+			return nil
+		}
+
+		if backupListJSON {
+			output, _ := json.MarshalIndent(runs, "", "  ")
+			fmt.Println(string(output))
+			return nil
+		}
+
+		// Display as table
+		return displayBackupTable(runs)
+	},
+}
+
+// displayBackupTable displays backup runs in a formatted table
+func displayBackupTable(runs []*models.BackupRun) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+
+	fmt.Fprintln(w, "TIMESTAMP\tSTATUS\tFILES\tSIZE\tDURATION")
+
+	// Sort by time (newest first)
+	for i := len(runs) - 1; i >= 0; i-- {
+		run := runs[i]
+		timestamp := run.RunTime.Format("2006-01-02 15:04:05")
+		status := run.Status
+		files := formatBackupFiles(run)
+		size := formatBytes(run.BytesUploaded)
+		duration := formatDuration(run.Duration)
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			timestamp, status, files, size, duration)
+	}
+
+	w.Flush()
+	return nil
+}
+
+// formatBackupFiles formats file statistics
+func formatBackupFiles(run *models.BackupRun) string {
+	parts := []string{}
+	if run.FilesAdded > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", run.FilesAdded))
+	}
+	if run.FilesChanged > 0 {
+		parts = append(parts, fmt.Sprintf("~%d", run.FilesChanged))
+	}
+	if run.FilesSkipped > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", run.FilesSkipped))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func init() {
+	backupCmd.AddCommand(backupListCmd)
+	backupListCmd.Flags().IntVar(&backupListLimit, "limit", 20, "Maximum number of backups to show")
+	backupListCmd.Flags().BoolVar(&backupListJSON, "json", false, "Output in JSON format")
 }

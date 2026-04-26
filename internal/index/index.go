@@ -282,3 +282,79 @@ func (db *IndexDB) GetAllEntries(jobID string) ([]*models.FileEntry, error) {
 
 	return entries, err
 }
+
+// GetRunByTime finds the latest backup run at or before the specified time
+func (db *IndexDB) GetRunByTime(jobID string, targetTime time.Time) (*models.BackupRun, error) {
+	var targetRun *models.BackupRun
+
+	err := db.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(fmt.Sprintf("run:%s:", jobID))
+		opts.Reverse = false
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				run := &models.BackupRun{}
+				if err := json.Unmarshal(val, run); err != nil {
+					return err
+				}
+				// Find latest run where runTime <= targetTime
+				if !run.RunTime.After(targetTime) {
+					targetRun = run
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	return targetRun, err
+}
+
+// GetEntriesForRun gets all file entries for a specific backup run
+func (db *IndexDB) GetEntriesForRun(jobID string, runTime time.Time) ([]*models.FileEntry, error) {
+	var entries []*models.FileEntry
+
+	// Use 1-second tolerance for matching
+	tolerance := 1 * time.Second
+
+	err := db.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(fmt.Sprintf("file:%s:", jobID))
+		opts.Reverse = false
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				entry := &models.FileEntry{}
+				if err := json.Unmarshal(val, entry); err != nil {
+					return err
+				}
+				// Match entries within tolerance window
+				if entry.BackupTime.Equal(runTime) ||
+					(entry.BackupTime.After(runTime.Add(-tolerance)) && entry.BackupTime.Before(runTime.Add(tolerance))) {
+					entries = append(entries, entry)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	return entries, err
+}
