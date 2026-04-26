@@ -1,0 +1,38 @@
+# Binaries
+ds3backup
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output files
+*.out
+
+# Go workspace file
+go.work
+
+# Config files (may contain secrets)
+config.json
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp files
+/tmp/

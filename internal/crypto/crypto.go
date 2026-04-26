@@ -1,0 +1,228 @@
+package crypto
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha256"
+	"errors"
+	"io"
+
+	"golang.org/x/crypto/argon2"
+	"github.com/klauspost/compress/zstd"
+	"golang.org/x/crypto/blake2b"
+)
+
+// EncryptedFile represents an encrypted file
+type EncryptedFile struct {
+	Nonce          []byte `json:"nonce"`
+	Ciphertext     []byte `json:"ciphertext"`
+	Tag            []byte `json:"tag"`
+	OriginalHash   []byte `json:"originalHash"`
+	OriginalSize   int64  `json:"originalSize"`
+	CompressedSize int64  `json:"compressedSize"`
+}
+
+// CryptoEngine handles encryption and compression
+type CryptoEngine struct {
+	masterKey []byte
+	salt      []byte
+}
+
+// NewCryptoEngine creates a new crypto engine from password
+func NewCryptoEngine(password string, salt []byte) (*CryptoEngine, error) {
+	if len(salt) == 0 {
+		// Generate random salt
+		salt = make([]byte, 16)
+		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+			return nil, err
+		}
+	}
+
+	// Derive master key using Argon2id
+	masterKey := argon2.IDKey(
+		[]byte(password),
+		salt,
+		3,           // iterations
+		64*1024,     // 64 MB memory
+		4,           // parallelism
+		32,          // key length
+	)
+
+	return &CryptoEngine{
+		masterKey: masterKey,
+		salt:      salt,
+	}, nil
+}
+
+// GetSalt returns the salt (for storage in config)
+func (e *CryptoEngine) GetSalt() []byte {
+	return e.salt
+}
+
+// deriveFileKey derives a per-file key from master key and file hash
+func (e *CryptoEngine) deriveFileKey(fileHash []byte) []byte {
+	h := hmac.New(sha256.New, e.masterKey)
+	h.Write(fileHash)
+	return h.Sum(nil)
+}
+
+// CompressAndEncrypt compresses and encrypts file content
+func (e *CryptoEngine) CompressAndEncrypt(content []byte) (*EncryptedFile, error) {
+	// 1. Calculate hash of original content (for dedup)
+	hash := blake2b.Sum256(content)
+
+	// 2. Compress with zstd
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	if err != nil {
+		return nil, err
+	}
+	compressed := enc.EncodeAll(content, nil)
+	enc.Close()
+
+	// 3. Derive per-file key
+	fileKey := e.deriveFileKey(hash[:])
+
+	// 4. Encrypt compressed data
+	block, err := aes.NewCipher(fileKey)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, compressed, nil)
+
+	return &EncryptedFile{
+		Nonce:          nonce,
+		Ciphertext:     ciphertext[gcm.NonceSize():],
+		Tag:            ciphertext[len(ciphertext)-gcm.Overhead():],
+		OriginalHash:   hash[:],
+		OriginalSize:   int64(len(content)),
+		CompressedSize: int64(len(compressed)),
+	}, nil
+}
+
+// DecryptAndDecompress decrypts and decompresses file content
+func (e *CryptoEngine) DecryptAndDecompress(encFile *EncryptedFile) ([]byte, error) {
+	// 1. Derive per-file key from stored hash
+	fileKey := e.deriveFileKey(encFile.OriginalHash)
+
+	// 2. Reconstruct ciphertext with nonce and tag
+	block, err := aes.NewCipher(fileKey)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepend nonce to ciphertext
+	ciphertext := append(encFile.Nonce, encFile.Ciphertext...)
+	ciphertext = append(ciphertext, encFile.Tag...)
+
+	// 3. Decrypt
+	compressed, err := gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], nil)
+	if err != nil {
+		return nil, errors.New("decryption failed: " + err.Error())
+	}
+
+	// 4. Decompress
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer dec.Close()
+
+	original, err := dec.DecodeAll(compressed, nil)
+	if err != nil {
+		return nil, errors.New("decompression failed: " + err.Error())
+	}
+
+	// 5. Verify hash
+	hash := blake2b.Sum256(original)
+	if string(hash[:]) != string(encFile.OriginalHash) {
+		return nil, errors.New("hash verification failed")
+	}
+
+	return original, nil
+}
+
+// Serialize converts EncryptedFile to bytes for storage
+func (e *EncryptedFile) Serialize() ([]byte, error) {
+	// Simple serialization: [nonce_len(2)][nonce][hash_len(2)][hash][orig_size(8)][comp_size(8)][ciphertext]
+	data := make([]byte, 0)
+	
+	// Nonce
+	data = append(data, byte(len(e.Nonce)))
+	data = append(data, e.Nonce...)
+	
+	// Hash
+	data = append(data, byte(len(e.OriginalHash)))
+	data = append(data, e.OriginalHash...)
+	
+	// Sizes
+	data = append(data, byte(e.OriginalSize>>56), byte(e.OriginalSize>>48), byte(e.OriginalSize>>40), byte(e.OriginalSize>>32))
+	data = append(data, byte(e.OriginalSize>>24), byte(e.OriginalSize>>16), byte(e.OriginalSize>>8), byte(e.OriginalSize))
+	
+	data = append(data, byte(e.CompressedSize>>56), byte(e.CompressedSize>>48), byte(e.CompressedSize>>40), byte(e.CompressedSize>>32))
+	data = append(data, byte(e.CompressedSize>>24), byte(e.CompressedSize>>16), byte(e.CompressedSize>>8), byte(e.CompressedSize))
+	
+	// Ciphertext
+	data = append(data, e.Ciphertext...)
+	
+	return data, nil
+}
+
+// DeserializeEncryptedFile reconstructs EncryptedFile from bytes
+func DeserializeEncryptedFile(data []byte) (*EncryptedFile, error) {
+	if len(data) < 20 {
+		return nil, errors.New("data too short")
+	}
+	
+	idx := 0
+	
+	// Nonce
+	nonceLen := int(data[idx])
+	idx++
+	nonce := data[idx : idx+nonceLen]
+	idx += nonceLen
+	
+	// Hash
+	hashLen := int(data[idx])
+	idx++
+	hash := data[idx : idx+hashLen]
+	idx += hashLen
+	
+	// Original size
+	origSize := int64(uint64(data[idx])<<56 | uint64(data[idx+1])<<48 | uint64(data[idx+2])<<40 | uint64(data[idx+3])<<32 |
+		uint64(data[idx+4])<<24 | uint64(data[idx+5])<<16 | uint64(data[idx+6])<<8 | uint64(data[idx+7]))
+	idx += 8
+	
+	// Compressed size
+	compSize := int64(uint64(data[idx])<<56 | uint64(data[idx+1])<<48 | uint64(data[idx+2])<<40 | uint64(data[idx+3])<<32 |
+		uint64(data[idx+4])<<24 | uint64(data[idx+5])<<16 | uint64(data[idx+6])<<8 | uint64(data[idx+7]))
+	idx += 8
+	
+	// Ciphertext
+	ciphertext := data[idx:]
+	
+	return &EncryptedFile{
+		Nonce:          nonce,
+		Ciphertext:     ciphertext,
+		OriginalHash:   hash,
+		OriginalSize:   origSize,
+		CompressedSize: compSize,
+	}, nil
+}

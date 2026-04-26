@@ -1,0 +1,121 @@
+package cli
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/spf13/cobra"
+	"github.com/esignoretti/ds3backup/internal/config"
+	"github.com/esignoretti/ds3backup/internal/crypto"
+	"github.com/esignoretti/ds3backup/internal/s3client"
+)
+
+// initCmd represents the init command
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize DS3 Backup with S3 target",
+	Long: `Initialize DS3 Backup by configuring S3 connection and encryption.
+
+This command will:
+  1. Validate S3 credentials and bucket access
+  2. Check Object Lock support
+  3. Set up encryption with your password
+  4. Create initial configuration file`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println("Initializing DS3 Backup...")
+
+		// Validate parameters
+		if endpoint == "" || bucket == "" || accessKey == "" || secretKey == "" || password == "" {
+			return fmt.Errorf("missing required parameters:\n  --endpoint, --bucket, --access-key, --secret-key, --password are required")
+		}
+
+		if objectLock != "GOVERNANCE" && objectLock != "COMPLIANCE" {
+			return fmt.Errorf("invalid object lock mode: %s (must be GOVERNANCE or COMPLIANCE)", objectLock)
+		}
+
+		// Create S3 config
+		s3Cfg := config.S3Config{
+			Endpoint:  endpoint,
+			Bucket:    bucket,
+			AccessKey: accessKey,
+			SecretKey: secretKey,
+			Region:    region,
+			UseSSL:    true,
+		}
+
+		// Test S3 connection
+		fmt.Println("Testing S3 connection...")
+		client, err := s3client.NewClient(s3Cfg)
+		if err != nil {
+			return fmt.Errorf("failed to connect to S3: %w", err)
+		}
+		fmt.Println("✓ S3 connection successful")
+
+		// Check Object Lock support
+		objectLockSupported, err := client.CheckObjectLockSupport()
+		if err != nil {
+			log.Printf("Warning: Could not check Object Lock support: %v", err)
+		} else if !objectLockSupported {
+			log.Printf("Warning: Bucket does not support Object Lock")
+		} else {
+			fmt.Println("✓ Object Lock supported")
+		}
+
+		// Create encryption engine to validate password
+		fmt.Println("Setting up encryption...")
+		cryptoEngine, err := crypto.NewCryptoEngine(password, nil)
+		if err != nil {
+			return fmt.Errorf("failed to setup encryption: %w", err)
+		}
+		fmt.Println("✓ Encryption configured")
+
+		// Create config
+		cfg := config.DefaultConfig()
+		cfg.S3 = s3Cfg
+		cfg.Encryption.Salt = cryptoEngine.GetSalt()
+		cfg.ObjectLock.Mode = objectLock
+		cfg.ObjectLock.DefaultRetentionDays = retentionDays
+
+		// Save config
+		cfgPath, err := config.DefaultConfigPath()
+		if err != nil {
+			return fmt.Errorf("failed to get config path: %w", err)
+		}
+		cfg.ConfigPath = cfgPath
+
+		if err := saveConfig(cfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		fmt.Printf("\n✓ DS3 Backup initialized successfully!\n")
+		fmt.Printf("  Config file: %s\n", cfgPath)
+		fmt.Printf("  S3 Endpoint: %s\n", endpoint)
+		fmt.Printf("  Bucket: %s\n", bucket)
+		fmt.Printf("  Object Lock: %s mode\n", objectLock)
+		fmt.Printf("  Retention: %d days\n", retentionDays)
+		fmt.Printf("\nNext steps:\n")
+		fmt.Printf("  1. Create a backup job: ds3backup job add --name=\"MyBackup\" --path=~/Documents\n")
+		fmt.Printf("  2. Run backup: ds3backup backup run <job-id>\n")
+
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(initCmd)
+
+	initCmd.Flags().StringVar(&endpoint, "endpoint", "", "S3 endpoint (e.g., s3.cubbit.eu)")
+	initCmd.Flags().StringVar(&bucket, "bucket", "", "S3 bucket name")
+	initCmd.Flags().StringVar(&accessKey, "access-key", "", "S3 access key")
+	initCmd.Flags().StringVar(&secretKey, "secret-key", "", "S3 secret key")
+	initCmd.Flags().StringVar(&region, "region", "us-east-1", "S3 region")
+	initCmd.Flags().StringVar(&password, "password", "", "Encryption password")
+	initCmd.Flags().StringVar(&objectLock, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE or COMPLIANCE)")
+	initCmd.Flags().IntVar(&retentionDays, "retention-days", 30, "Default retention period in days")
+
+	initCmd.MarkFlagRequired("endpoint")
+	initCmd.MarkFlagRequired("bucket")
+	initCmd.MarkFlagRequired("access-key")
+	initCmd.MarkFlagRequired("secret-key")
+	initCmd.MarkFlagRequired("password")
+}
