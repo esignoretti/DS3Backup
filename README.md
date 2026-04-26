@@ -1,6 +1,6 @@
 # DS3 Backup
 
-**Version:** 0.0.4
+**Version:** 0.0.5
 
 **DS3 Backup** is a secure, S3-only backup tool with client-side encryption, designed for simplicity and reliability.
 
@@ -370,10 +370,43 @@ ds3backup index rebuild <job-id> --from-s3
 ### Phase 4: Restore
  - ✅ **Phase 4.1: MVP Restore** - Core restore functionality (latest backup, all files)
  - ✅ **Phase 4.2: Selective restore** - Pattern filtering, progress tracking, enhanced output
- - ✅ **Phase 4.3: Point-in-time recovery** - Restore from specific backup points
- - ⏳ Phase 4.4: Advanced features (parallel downloads optimization, resume)
+  - ✅ **Phase 4.3: Point-in-time recovery** - Restore from specific backup points
+  - ✅ **Phase 4.4 Part 1: Resume functionality** - Interrupted restore recovery
+  - ⏳ Phase 4.4 Part 2: Parallel optimization (dynamic scaling, bandwidth control)
 
 ## Changelog
+
+### v0.0.5 (2026-04-26)
+
+**New Features:**
+- **Resume interrupted restores** (Phase 4.4 Part 1 - MVP)
+  - `restore resume <job-id>` - Resume from last saved state
+  - `restore status <job-id>` - View restore progress and state
+  - Automatic state persistence every 5 seconds
+  - Partial file handling with `.partial` suffix
+  - Retry logic with exponential backoff (3 retries default)
+  - Session-based state management
+  - Auto-cleanup: 7 days OR keep last 10 states
+  - Non-retryable error detection
+
+**CLI Commands:**
+- `restore resume` - Resume interrupted restore
+  - `--retry-failed` - Retry only failed files
+  - `--session=<timestamp>` - Specific restore session
+  - `--password` - Encryption password (required)
+- `restore status` - Show restore state and progress
+
+**Technical:**
+- New `RestoreState` struct for tracking restore progress
+- JSON-based state persistence with atomic writes
+- `DownloaderV2` with retry logic and state tracking
+- State discovery and loading utilities
+- Partial file detection and cleanup
+
+**Known Limitations (MVP):**
+- Per-file resume only (re-downloads partial files)
+- Byte-range resume planned for v0.0.6
+- Fixed 8 workers (dynamic scaling in Part 2)
 
 ### v0.0.4 (2026-04-26)
 **New Features:**
@@ -459,3 +492,107 @@ Contributions welcome! Please open an issue or submit a PR.
 ## Support
 
 For issues and feature requests, please use GitHub Issues.
+
+## Advanced Restore Features (v0.0.5+)
+
+### Resume Interrupted Restores
+
+If a restore operation is interrupted (network failure, system crash, manual cancellation), you can resume it without starting over:
+
+```bash
+# Resume latest interrupted restore
+ds3backup restore resume <job-id> --password=YOUR_PASSWORD
+
+# Resume specific restore session
+ds3backup restore resume <job-id> --session=2024-04-26T10-30-00 --password=YOUR_PASSWORD
+
+# Retry only failed files
+ds3backup restore resume <job-id> --retry-failed --password=YOUR_PASSWORD
+```
+
+**How it works:**
+- Restore state is saved every 5 seconds to `~/.ds3backup/state/<job-id>/<timestamp>/`
+- Partial files are kept with `.partial` suffix during download
+- On resume, incomplete files are re-downloaded (byte-range resume in future versions)
+- State includes: progress, failed files, retry counts, error messages
+
+### View Restore Status
+
+Check the status of restore operations:
+
+```bash
+ds3backup restore status <job-id>
+```
+
+**Example output:**
+```
+Restore State for job: job_123456
+Session: 2024-04-26T10-30-00
+Started: 2024-04-26 10:30:00
+Last Update: 2024-04-26 10:35:00
+Status: running
+
+Progress: 6/10 files (60%)
+Bytes Restored: 6.00 MB / 10.00 MB
+Speed: 15.50 MB/s
+
+File Status:
+  ✅ Completed: 6
+  ⏭️  Skipped: 0
+  ⏳ Pending: 3
+  ❌ Failed: 1
+
+Failed Files:
+  - /path/to/file.txt: download failed: connection timeout
+
+Resume with: ds3backup restore resume job_123456 --retry-failed --password=xxx
+```
+
+### State Management
+
+Restore states are automatically cleaned up:
+- States older than 7 days are removed
+- Last 10 restore states are always kept
+- Cleanup happens automatically on new restore operations
+
+Manual cleanup:
+```bash
+# Remove states older than 7 days (future command)
+ds3backup restore cleanup <job-id> --older-than=7d
+```
+
+### State File Structure
+
+```
+~/.ds3backup/state/<job-id>/
+  2024-04-26T10-30-00/
+    restore-state.json      # State file
+    partial/                 # Partial files directory
+      large-file.zip.partial
+```
+
+### Best Practices
+
+1. **Always use --password flag**: Required for decrypting files during resume
+2. **Check status before resuming**: Use `restore status` to see what needs to be resumed
+3. **Use --retry-failed for quick retries**: Only retries failed files, skips completed ones
+4. **Monitor failed files**: Repeated failures may indicate network or permission issues
+
+### Troubleshooting
+
+**Issue: "no restore states found"**
+- No interrupted restore exists for this job
+- State was automatically cleaned up (older than 7 days)
+- Solution: Start a fresh restore
+
+**Issue: "failed to load state"**
+- State file may be corrupted
+- Solution: Remove state directory and start fresh
+  ```bash
+  rm -rf ~/.ds3backup/state/<job-id>/<session>
+  ```
+
+**Issue: Partial files not cleaned up**
+- Normal behavior for failed restores
+- Will be re-downloaded on resume
+- Manual cleanup: `find ~/.ds3backup -name "*.partial" -delete`
