@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/esignoretti/ds3backup/internal/config"
@@ -16,10 +17,14 @@ import (
 )
 
 var (
-	restoreTo     string
-	restoreDryRun bool
-	restoreVerify bool
-	restoreOverwrite bool
+	restoreTo         string
+	restoreDryRun     bool
+	restoreVerify     bool
+	restoreOverwrite  bool
+	restoreInclude    []string
+	restoreExclude    []string
+	restoreJSON       bool
+	restorePassword   string
 )
 
 // restoreCmd represents the restore command
@@ -50,6 +55,10 @@ var restoreRunCmd = &cobra.Command{
 			return fmt.Errorf("job not found: %s", jobID)
 		}
 
+		if !restoreDryRun && restorePassword == "" {
+			return fmt.Errorf("password required for restore (use --password flag)")
+		}
+
 		fmt.Printf("Starting restore for job: %s\n", job.Name)
 		if restoreTo != "" {
 			fmt.Printf("Destination: %s\n", restoreTo)
@@ -61,6 +70,12 @@ var restoreRunCmd = &cobra.Command{
 		} else if restoreVerify {
 			fmt.Println("Mode: Verification only")
 		}
+		if len(restoreInclude) > 0 {
+			fmt.Printf("Include patterns: %v\n", restoreInclude)
+		}
+		if len(restoreExclude) > 0 {
+			fmt.Printf("Exclude patterns: %v\n", restoreExclude)
+		}
 		fmt.Println()
 
 		// Create S3 client
@@ -70,7 +85,7 @@ var restoreRunCmd = &cobra.Command{
 		}
 
 		// Create crypto engine
-		cryptoEngine, err := crypto.NewCryptoEngine(password, cfg.Encryption.Salt)
+		cryptoEngine, err := crypto.NewCryptoEngine(restorePassword, cfg.Encryption.Salt)
 		if err != nil {
 			return fmt.Errorf("failed to create crypto engine: %w", err)
 		}
@@ -99,137 +114,181 @@ var restoreRunCmd = &cobra.Command{
 			DestinationPath: restoreTo,
 			DryRun:          restoreDryRun,
 			Overwrite:       restoreOverwrite,
+			IncludePatterns: restoreInclude,
+			ExcludePatterns: restoreExclude,
 			Concurrency:     8,
 		}
 
-		var result *models.RestoreResult
-		var verifyResult *models.VerifyResult
-		var dryRunResult *models.DryRunResult
-
 		if restoreVerify {
-			// Verification mode
-			fmt.Println("🔍 Verifying backup integrity...")
-			verifyResult, err = engine.Verify(jobID)
-			if err != nil {
-				return fmt.Errorf("verification failed: %w", err)
-			}
-
-			if jsonOutput {
-				output, _ := json.MarshalIndent(verifyResult, "", "  ")
-				fmt.Println(string(output))
-			} else {
-				if verifyResult.Failed == 0 {
-					fmt.Printf("✅ All %d files verified successfully\n", verifyResult.Verified)
-					fmt.Printf("   Total size: %d bytes\n", verifyResult.Total)
-					fmt.Println("   All hashes match")
-					fmt.Println("   All files decryptable")
-				} else {
-					fmt.Printf("❌ %d files failed verification\n", verifyResult.Failed)
-					fmt.Println()
-					fmt.Println("Failed files:")
-					for _, errMsg := range verifyResult.Errors {
-						fmt.Printf("   - %s\n", errMsg)
-					}
-					fmt.Printf("\nVerified: %d/%d files (%.1f%%)\n",
-						verifyResult.Verified, verifyResult.Total,
-						float64(verifyResult.Verified)*100/float64(verifyResult.Total))
-				}
-			}
-			return nil
+			return runVerify(engine, jobID)
 		}
 
 		if restoreDryRun {
-			// Dry-run mode
-			fmt.Println("📋 Restore Preview (Dry Run)")
-			fmt.Println()
-			dryRunResult, err = engine.DryRun(jobID, opts)
-			if err != nil {
-				return fmt.Errorf("dry-run failed: %w", err)
-			}
-
-			if jsonOutput {
-				output, _ := json.MarshalIndent(dryRunResult, "", "  ")
-				fmt.Println(string(output))
-			} else {
-				fmt.Printf("Files to restore: %d\n", dryRunResult.FilesToRestore)
-				fmt.Printf("Files to skip (already exist): %d\n", dryRunResult.FilesSkipped)
-				fmt.Printf("Total size: %s\n", formatBytes(dryRunResult.TotalSize))
-				fmt.Printf("Estimated time: ~%d minutes (at 8.5 MB/s)\n", dryRunResult.TotalSize/1024/1024/8/60+1)
-				fmt.Println()
-
-				if len(dryRunResult.SampleFiles) > 0 {
-					fmt.Println("Sample files:")
-					for _, f := range dryRunResult.SampleFiles {
-						fmt.Printf("  - %s (%s)\n", f.Path, formatBytes(f.Size))
-					}
-					if dryRunResult.MoreFiles > 0 {
-						fmt.Printf("  ... (%d more files)\n", dryRunResult.MoreFiles)
-					}
-				}
-			}
-			return nil
+			return runDryRun(engine, jobID, opts)
 		}
 
-		// Full restore
-		fmt.Println("🔄 Restoring files...")
-		fmt.Println()
-
-		result, err = engine.Restore(jobID, opts)
-		if err != nil {
-			return fmt.Errorf("restore failed: %w", err)
-		}
-
-		// Display results
-		if jsonOutput {
-			output, _ := json.MarshalIndent(result, "", "  ")
-			fmt.Println(string(output))
-		} else {
-			fmt.Println()
-			fmt.Println("✅ Restore completed")
-			fmt.Printf("   Files restored: %d\n", result.FilesRestored)
-			fmt.Printf("   Files skipped: %d\n", result.FilesSkipped)
-			if result.FilesFailed > 0 {
-				fmt.Printf("   Files failed: %d\n", result.FilesFailed)
-			}
-			fmt.Printf("   Bytes restored: %s\n", formatBytes(result.BytesRestored))
-			fmt.Printf("   Duration: %ds\n", result.Duration)
-
-			if len(result.Warnings) > 0 {
-				// Deduplicate and limit warnings
-				warningCount := len(result.Warnings)
-				fmt.Printf("   ⚠️  Metadata warnings: %d\n", warningCount)
-				maxWarnings := 10
-				shown := 0
-				for i, w := range result.Warnings {
-					if shown >= maxWarnings {
-						fmt.Printf("      ... and %d more\n", warningCount-maxWarnings)
-						break
-					}
-					fmt.Printf("      - %s\n", w)
-					shown++
-					if i < warningCount-1 && shown >= maxWarnings {
-						fmt.Printf("      ... and %d more\n", warningCount-maxWarnings)
-						break
-					}
-				}
-			}
-
-			if result.FilesFailed > 0 && len(result.Errors) > 0 {
-				fmt.Println()
-				fmt.Println("Failed files:")
-				maxErrors := 10
-				for i, errMsg := range result.Errors {
-					if i >= maxErrors {
-						fmt.Printf("   ... and %d more\n", len(result.Errors)-maxErrors)
-						break
-					}
-					fmt.Printf("   - %s\n", errMsg)
-				}
-			}
-		}
-
-		return nil
+		return runRestore(engine, jobID, opts)
 	},
+}
+
+func runVerify(engine *restore.RestoreEngine, jobID string) error {
+	fmt.Println("🔍 Verifying backup integrity...")
+	fmt.Println()
+
+	result, err := engine.Verify(jobID)
+	if err != nil {
+		return fmt.Errorf("verification failed: %w", err)
+	}
+
+	if restoreJSON {
+		output, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(output))
+		return nil
+	}
+
+	if result.Failed == 0 {
+		fmt.Printf("✅ All %d files verified successfully\n", result.Verified)
+		fmt.Println("   All hashes match")
+		fmt.Println("   All files decryptable")
+	} else {
+		fmt.Printf("❌ %d files failed verification\n", result.Failed)
+		fmt.Println()
+		fmt.Println("Failed files:")
+		for i, errMsg := range result.Errors {
+			if i >= 10 {
+				fmt.Printf("   ... and %d more\n", len(result.Errors)-10)
+				break
+			}
+			fmt.Printf("   - %s\n", errMsg)
+		}
+		fmt.Printf("\nVerified: %d/%d files (%.1f%%)\n",
+			result.Verified, result.Total,
+			float64(result.Verified)*100/float64(result.Total))
+	}
+
+	return nil
+}
+
+func runDryRun(engine *restore.RestoreEngine, jobID string, opts *models.RestoreOptions) error {
+	fmt.Println("📋 Restore Preview (Dry Run)")
+	fmt.Println()
+
+	result, err := engine.DryRun(jobID, opts)
+	if err != nil {
+		return fmt.Errorf("dry-run failed: %w", err)
+	}
+
+	if restoreJSON {
+		output, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(output))
+		return nil
+	}
+
+	fmt.Printf("Files to restore: %d\n", result.FilesToRestore)
+	fmt.Printf("Files to skip (already exist): %d\n", result.FilesSkipped)
+	fmt.Printf("Total size: %s\n", restore.FormatBytes(result.TotalSize))
+	
+	// Estimate time (rough estimate at 10 MB/s)
+	estimatedSeconds := float64(result.TotalSize) / 10 / 1024 / 1024
+	if estimatedSeconds < 60 {
+		fmt.Printf("Estimated time: ~%.0f seconds\n", estimatedSeconds)
+	} else {
+		fmt.Printf("Estimated time: ~%.1f minutes\n", estimatedSeconds/60)
+	}
+	fmt.Println()
+
+	if len(result.SampleFiles) > 0 {
+		fmt.Println("Sample files:")
+		for _, f := range result.SampleFiles {
+			fmt.Printf("  - %s (%s)\n", f.Path, restore.FormatBytes(f.Size))
+		}
+		if result.MoreFiles > 0 {
+			fmt.Printf("  ... (%d more files)\n", result.MoreFiles)
+		}
+	}
+
+	return nil
+}
+
+func runRestore(engine *restore.RestoreEngine, jobID string, opts *models.RestoreOptions) error {
+	fmt.Println("🔄 Restoring files...")
+	fmt.Println()
+
+	// Get total files for progress
+	configDir, _ := config.ConfigDir()
+	indexDir := filepath.Join(configDir, "index", jobID)
+	indexDB, err := index.OpenIndexDB(indexDir)
+	if err != nil {
+		return err
+	}
+	defer indexDB.Close()
+
+	entries, err := indexDB.GetAllEntries(jobID)
+	if err != nil {
+		return err
+	}
+
+	totalFiles := len(entries)
+	
+	// Create progress tracker
+	tracker := restore.NewProgressTracker(totalFiles)
+
+	result, err := engine.RestoreWithProgress(jobID, opts, tracker)
+	if err != nil {
+		return fmt.Errorf("restore failed: %w", err)
+	}
+
+	if restoreJSON {
+		output, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(output))
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("✅ Restore completed")
+	fmt.Printf("   Files restored: %d\n", result.FilesRestored)
+	fmt.Printf("   Files skipped: %d\n", result.FilesSkipped)
+	if result.FilesFailed > 0 {
+		fmt.Printf("   Files failed: %d\n", result.FilesFailed)
+	}
+	fmt.Printf("   Bytes restored: %s\n", restore.FormatBytes(result.BytesRestored))
+	fmt.Printf("   Duration: %s\n", formatDuration(time.Duration(result.Duration)*time.Second))
+
+	if len(result.Warnings) > 0 {
+		fmt.Printf("   ⚠️  Metadata warnings: %d\n", len(result.Warnings))
+		maxWarnings := 5
+		for i, w := range result.Warnings {
+			if i >= maxWarnings {
+				fmt.Printf("      ... and %d more\n", len(result.Warnings)-maxWarnings)
+				break
+			}
+			fmt.Printf("      - %s\n", w)
+		}
+	}
+
+	if result.FilesFailed > 0 && len(result.Errors) > 0 {
+		fmt.Println()
+		fmt.Println("Failed files:")
+		maxErrors := 10
+		for i, errMsg := range result.Errors {
+			if i >= maxErrors {
+				fmt.Printf("   ... and %d more\n", len(result.Errors)-maxErrors)
+				break
+			}
+			fmt.Printf("   - %s\n", errMsg)
+		}
+	}
+
+	return nil
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	minutes := int(d.Minutes())
+	seconds := int(d.Seconds()) % 60
+	return fmt.Sprintf("%dm %ds", minutes, seconds)
 }
 
 func init() {
@@ -240,6 +299,8 @@ func init() {
 	restoreRunCmd.Flags().BoolVar(&restoreDryRun, "dry-run", false, "Preview restore without downloading")
 	restoreRunCmd.Flags().BoolVar(&restoreVerify, "verify", false, "Verify backup integrity without restoring")
 	restoreRunCmd.Flags().BoolVar(&restoreOverwrite, "overwrite", false, "Overwrite existing files")
-	restoreRunCmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
-	restoreRunCmd.Flags().StringVar(&password, "password", "", "Encryption password")
+	restoreRunCmd.Flags().StringSliceVar(&restoreInclude, "include", nil, "Include files matching pattern (e.g., \"**/*.pdf\")")
+	restoreRunCmd.Flags().StringSliceVar(&restoreExclude, "exclude", nil, "Exclude files matching pattern")
+	restoreRunCmd.Flags().StringVar(&restorePassword, "password", "", "Encryption password (required for restore)")
+	restoreRunCmd.Flags().BoolVar(&restoreJSON, "json", false, "JSON output")
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/esignoretti/ds3backup/internal/config"
@@ -277,23 +277,115 @@ func (e *RestoreEngine) getDestinationPath(entry *models.FileEntry, opts *models
 }
 
 // matchPattern checks if a path matches a glob pattern
+// matchPattern checks if a path matches a glob pattern
 func matchPattern(path, pattern string) bool {
 	matched, err := filepath.Match(pattern, path)
 	if err != nil {
 		return false
 	}
-	if matched {
-		return true
+	return matched
+}
+// RestoreWithProgress restores files with progress tracking
+func (e *RestoreEngine) RestoreWithProgress(jobID string, opts *models.RestoreOptions, tracker *ProgressTracker) (*models.RestoreResult, error) {
+	// Get all entries
+	entries, err := e.indexDB.GetAllEntries(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get index entries: %w", err)
 	}
 
-	// Try with ** pattern (recursive match)
-	if strings.Contains(pattern, "**") {
-		// Convert ** to regex-like matching
-		pattern = strings.Replace(pattern, "**/", "(**/)?", -1)
-		pattern = strings.Replace(pattern, "**", "*", -1)
-		matched, _ = filepath.Match(pattern, path)
-		return matched
+	// Filter by patterns
+	filtered := e.filterEntries(entries, opts)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no files match the specified patterns")
 	}
 
-	return false
+	// Prepare restore lists
+	var filesToRestore []*models.FileEntry
+	var filesToSkip []string
+
+	if !opts.Overwrite && opts.DestinationPath == "" {
+		// Check which files already exist
+		for _, entry := range filtered {
+			destPath := e.getDestinationPath(entry, opts)
+			if _, err := os.Stat(destPath); err == nil {
+				filesToSkip = append(filesToSkip, destPath)
+			} else {
+				filesToRestore = append(filesToRestore, entry)
+			}
+		}
+	} else {
+		filesToRestore = filtered
+	}
+
+	// Calculate total size
+	var totalSize int64
+	for _, entry := range filesToRestore {
+		totalSize += entry.Size
+	}
+
+	if opts.DryRun {
+		return &models.RestoreResult{
+			FilesRestored: 0,
+			FilesSkipped:  len(filesToSkip),
+			BytesRestored: 0,
+		}, nil
+	}
+
+	// Create context
+	ctx := context.Background()
+
+	// Create downloader
+	downloader := NewDownloader(opts.Concurrency, e.s3client, e.crypto, e.extractor, ctx)
+	downloader.Start()
+
+	// Submit jobs
+	var mu sync.Mutex
+	result := &models.RestoreResult{
+		FilesRestored: 0,
+		FilesSkipped:  len(filesToSkip),
+		BytesRestored: 0,
+		Warnings:      []string{},
+		Errors:        []string{},
+	}
+
+	for _, entry := range filesToRestore {
+		destPath := e.getDestinationPath(entry, opts)
+		job := &Job{
+			Entry:    entry,
+			DestPath: destPath,
+			IsBatch:  entry.IsInBatch,
+			BatchID:  entry.BatchID,
+		}
+		downloader.Submit(job)
+	}
+
+	downloader.Stop()
+
+	// Collect results
+	for res := range downloader.Results() {
+		if res.Skipped {
+			mu.Lock()
+			result.FilesSkipped++
+			mu.Unlock()
+			tracker.Update(res.Entry.Path, res.Bytes, true)
+		} else if res.Success {
+			mu.Lock()
+			result.FilesRestored++
+			result.BytesRestored += res.Bytes
+			if len(res.Warnings) > 0 {
+				result.Warnings = append(result.Warnings, res.Warnings...)
+			}
+			mu.Unlock()
+			tracker.Update(res.Entry.Path, res.Bytes, false)
+		} else {
+			mu.Lock()
+			result.FilesFailed++
+			if res.Error != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+			}
+			mu.Unlock()
+		}
+	}
+
+	return result, nil
 }
