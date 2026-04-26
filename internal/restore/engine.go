@@ -488,3 +488,107 @@ func (e *RestoreEngine) RestoreEntries(jobID string, opts *models.RestoreOptions
 
 	return result, nil
 }
+
+// ResumeRestore resumes an interrupted restore from saved state
+func (e *RestoreEngine) ResumeRestore(
+	state *RestoreState,
+	stateDir string,
+	opts *models.RestoreOptions,
+	tracker *ProgressTracker,
+	filesToRestore []*FileState,
+) (*models.RestoreResult, error) {
+	if len(filesToRestore) == 0 {
+		return &models.RestoreResult{}, nil
+	}
+
+	// Convert FileState back to FileEntry for processing
+	// Note: We need to fetch entries from index to get full details
+	// For now, we'll work with what we have in state
+	
+	// Create download channel
+	downloadChan := make(chan *FileState, len(filesToRestore))
+	for _, fileState := range filesToRestore {
+		downloadChan <- fileState
+	}
+	close(downloadChan)
+
+	// Result tracking
+	result := &models.RestoreResult{
+		FilesRestored: 0,
+		FilesSkipped:  0,
+		BytesRestored: 0,
+		Warnings:      []string{},
+		Errors:        []string{},
+	}
+
+	var mu sync.Mutex
+	numWorkers := opts.Concurrency
+	if numWorkers <= 0 {
+		numWorkers = 8
+	}
+
+	// Create downloader V2
+	ctx := context.Background()
+	downloader := NewDownloaderV2(
+		numWorkers,
+		e.s3client,
+		e.crypto,
+		e.extractor,
+		ctx,
+		state,
+		stateDir,
+		3,  // maxRetries
+		1,  // retryDelay (seconds)
+	)
+	downloader.Start()
+
+	// Submit jobs
+	for fileState := range downloadChan {
+		// We need to get the full entry from index
+		// For MVP, we'll create a minimal entry
+		entry := &models.FileEntry{
+			Path:      fileState.Path,
+			Size:      fileState.Size,
+			Hash:      fileState.Hash,
+			S3Key:     fileState.S3Key,
+			IsInBatch: fileState.BatchID != "",
+			BatchID:   fileState.BatchID,
+		}
+		
+		job := &DownloadJob{
+			Entry:    entry,
+			DestPath: fileState.Path,
+			IsBatch:  fileState.BatchID != "",
+			BatchID:  fileState.BatchID,
+		}
+		downloader.Submit(job)
+	}
+
+	downloader.Stop()
+
+	// Collect results
+	for res := range downloader.Results() {
+		if res.Skipped {
+			mu.Lock()
+			result.FilesSkipped++
+			mu.Unlock()
+		} else if res.Success {
+			mu.Lock()
+			result.FilesRestored++
+			result.BytesRestored += res.Bytes
+			if len(res.Warnings) > 0 {
+				result.Warnings = append(result.Warnings, res.Warnings...)
+			}
+			mu.Unlock()
+		} else {
+			mu.Lock()
+			result.FilesFailed++
+			if res.Error != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.DestPath, res.Error))
+			}
+			mu.Unlock()
+		}
+	}
+
+	return result, nil
+}

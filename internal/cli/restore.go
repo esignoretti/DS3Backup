@@ -472,3 +472,236 @@ func init() {
 	restoreRunCmd.Flags().StringVar(&restoreTime, "time", "", "Restore from specific time (e.g., '2024-04-26T10:30:00Z', '1d', '2h')")
 	restoreRunCmd.Flags().BoolVar(&restoreJSON, "json", false, "JSON output")
 }
+
+var (
+	restoreResumeRetryFailed bool
+	restoreResumeSession     string
+	restoreResumeAuto        bool
+)
+
+// restoreResumeCmd represents the restore resume command
+var restoreResumeCmd = &cobra.Command{
+	Use:   "resume <job-id>",
+	Short: "Resume interrupted restore",
+	Long:  `Resume an interrupted restore operation from the last saved state.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jobID := args[0]
+
+		// Load config
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+
+		// Find job
+		job := cfg.GetJob(jobID)
+		if job == nil {
+			return fmt.Errorf("job not found: %s", jobID)
+		}
+
+		if restorePassword == "" {
+			return fmt.Errorf("password required for restore (use --password flag)")
+		}
+
+		// Load config directory
+		configDir, err := config.ConfigDir()
+		if err != nil {
+			return fmt.Errorf("failed to get config directory: %w", err)
+		}
+
+		// Find restore state
+		var state *restore.RestoreState
+		var stateDir string
+
+		if restoreResumeAuto || restoreResumeSession == "" {
+			// Find latest state
+			state, stateDir, err = restore.FindLatestRestoreState(jobID, configDir)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("📋 Found interrupted restore from %s\n", state.SessionID)
+		} else {
+			// Load specific session
+			state, stateDir, err = restore.FindRestoreStateBySession(jobID, restoreResumeSession, configDir)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("📋 Restoring from session %s\n", restoreResumeSession)
+		}
+
+		fmt.Printf("   Status: %s\n", state.Status)
+		fmt.Printf("   Progress: %d/%d files, %s restored\n", 
+			state.ProcessedFiles, state.TotalFiles, formatBytes(state.BytesRestored))
+		fmt.Println()
+
+		// Determine which files to restore
+		var filesToRestore []*restore.FileState
+		if restoreResumeRetryFailed {
+			filesToRestore = state.GetFailedFiles()
+			if len(filesToRestore) == 0 {
+				fmt.Println("✅ No failed files to retry")
+				return nil
+			}
+			fmt.Printf("🔄 Retrying %d failed files...\n", len(filesToRestore))
+		} else {
+			filesToRestore = state.GetIncompleteFiles()
+			if len(filesToRestore) == 0 {
+				fmt.Println("✅ Restore already complete")
+				return nil
+			}
+			fmt.Printf("🔄 Resuming restore: %d files remaining...\n", len(filesToRestore))
+		}
+		fmt.Println()
+
+		// Create S3 client
+		s3Client, err := s3client.NewClient(cfg.S3)
+		if err != nil {
+			return fmt.Errorf("failed to create S3 client: %w", err)
+		}
+
+		// Create crypto engine
+		cryptoEngine, err := crypto.NewCryptoEngine(restorePassword, cfg.Encryption.Salt)
+		if err != nil {
+			return fmt.Errorf("failed to create crypto engine: %w", err)
+		}
+
+		// Open index DB
+		indexDir := filepath.Join(configDir, "index", jobID)
+		indexDB, err := index.OpenIndexDB(indexDir)
+		if err != nil {
+			return fmt.Errorf("failed to open index: %w", err)
+		}
+		defer indexDB.Close()
+
+		// Create restore engine
+		engine := restore.NewRestoreEngine(cfg, s3Client, indexDB, cryptoEngine)
+
+		// Restore options
+		opts := &models.RestoreOptions{
+			DestinationPath: state.DestinationPath,
+			DryRun:          false,
+			Overwrite:       false,
+			Concurrency:     8,
+		}
+
+		// Create progress tracker
+		tracker := restore.NewProgressTracker(state.TotalFiles)
+
+		// Resume restore
+		fmt.Println("🔄 Resuming restore...")
+		fmt.Println()
+
+		result, err := engine.ResumeRestore(state, stateDir, opts, tracker, filesToRestore)
+		if err != nil {
+			return fmt.Errorf("resume failed: %w", err)
+		}
+
+		// Display results
+		fmt.Println()
+		fmt.Println("✅ Restore completed")
+		fmt.Printf("   Files restored: %d\n", result.FilesRestored)
+		fmt.Printf("   Files skipped: %d\n", result.FilesSkipped)
+		if result.FilesFailed > 0 {
+			fmt.Printf("   Files failed: %d\n", result.FilesFailed)
+		}
+		fmt.Printf("   Bytes restored: %s\n", formatBytes(result.BytesRestored))
+		fmt.Printf("   Duration: %s\n", formatDuration(time.Duration(result.Duration)*time.Second))
+
+		return nil
+	},
+}
+
+// restoreStatusCmd represents the restore status command
+var restoreStatusCmd = &cobra.Command{
+	Use:   "status <job-id>",
+	Short: "Show restore state",
+	Long:  `Show the status of restore operations for a job.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jobID := args[0]
+
+		// Load config directory
+		configDir, err := config.ConfigDir()
+		if err != nil {
+			return err
+		}
+
+		// Find latest state
+		state, stateDir, err := restore.FindLatestRestoreState(jobID, configDir)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Restore State for job: %s\n", jobID)
+		fmt.Printf("Session: %s\n", state.SessionID)
+		fmt.Printf("Started: %s\n", state.StartTime.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Last Update: %s\n", state.LastUpdateTime.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Status: %s\n", state.Status)
+		fmt.Println()
+		fmt.Printf("Progress: %d/%d files (%d%%)\n", 
+			state.ProcessedFiles, state.TotalFiles,
+			state.ProcessedFiles*100/state.TotalFiles)
+		fmt.Printf("Bytes Restored: %s / %s\n", 
+			formatBytes(state.BytesRestored), formatBytes(state.BytesTotal))
+		fmt.Printf("Speed: %.2f MB/s\n", state.SpeedMBps)
+		fmt.Println()
+
+		// Show file status summary
+		completed := 0
+		failed := 0
+		pending := 0
+		skipped := 0
+		for _, file := range state.Files {
+			switch file.Status {
+			case "completed":
+				completed++
+			case "failed":
+				failed++
+			case "pending", "downloading":
+				pending++
+			case "skipped":
+				skipped++
+			}
+		}
+
+		fmt.Println("File Status:")
+		fmt.Printf("  ✅ Completed: %d\n", completed)
+		fmt.Printf("  ⏭️  Skipped: %d\n", skipped)
+		fmt.Printf("  ⏳ Pending: %d\n", pending)
+		fmt.Printf("  ❌ Failed: %d\n", failed)
+		fmt.Println()
+
+		// Show failed files if any
+		if failed > 0 {
+			fmt.Println("Failed Files:")
+			count := 0
+			for path, file := range state.Files {
+				if file.Status == "failed" {
+					fmt.Printf("  - %s: %s\n", path, file.LastError)
+					count++
+					if count >= 10 {
+						fmt.Printf("  ... and %d more\n", failed-10)
+						break
+					}
+				}
+			}
+			fmt.Println()
+			fmt.Println("Resume with: ds3backup restore resume", jobID, "--retry-failed --password=xxx")
+		}
+
+		fmt.Printf("State Directory: %s\n", stateDir)
+
+		return nil
+	},
+}
+
+func init() {
+	restoreCmd.AddCommand(restoreResumeCmd)
+	restoreCmd.AddCommand(restoreStatusCmd)
+
+	restoreResumeCmd.Flags().BoolVar(&restoreResumeRetryFailed, "retry-failed", false, "Retry only failed files")
+	restoreResumeCmd.Flags().StringVar(&restoreResumeSession, "session", "", "Specific restore session (timestamp)")
+	restoreResumeCmd.Flags().BoolVar(&restoreResumeAuto, "auto", true, "Auto-resume latest interrupted restore")
+	restoreResumeCmd.Flags().StringVar(&restorePassword, "password", "", "Encryption password (required for resume)")
+}
