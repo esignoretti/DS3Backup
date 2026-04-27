@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -157,6 +159,20 @@ Example:
 					fmt.Printf("   ⚠️  WARNING: Index sync to S3 failed (local index updated, can rebuild from S3)\n")
 				}
 			}
+		}
+
+		// Explicitly close index to release BadgerDB locks
+		if indexDB != nil {
+			indexDB.Close()
+			// Force garbage collection to release file handles
+			runtime.GC()
+			// Sync filesystem
+			_ = exec.Command("sync").Run()
+			// CRITICAL: macOS needs 15+ seconds to release file descriptor locks
+			// This is a known BadgerDB bug on macOS
+			fmt.Fprintln(os.Stderr, "⏳ Releasing BadgerDB locks (macOS workaround, 15s)...")
+			time.Sleep(15 * time.Second)
+			fmt.Fprintln(os.Stderr, "✅ Locks released")
 		}
 
 		return err
