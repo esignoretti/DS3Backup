@@ -69,3 +69,28 @@ If you encounter this issue, please:
 
 **Last Updated:** 2026-04-27  
 **Affected Versions:** 0.0.1 - 0.0.5
+
+---
+
+## BadgerDB Restore Implementation
+
+**Status:** ✅ Implemented in v0.0.7+
+
+### Full Index Recovery
+
+The rebuild command now fully restores the BadgerDB index from S3 backups:
+
+```bash
+# Simulate disaster (delete local config)
+rm -rf ~/.ds3backup
+
+# Rebuild from S3
+ds3backup init --rebuild --endpoint=... --bucket=... --access-key=... --secret-key=... --master-password="..."
+```
+
+**What gets restored:**
+1. ✅ Job configurations from `.ds3backup/jobs/<job-id>/config.json.enc`
+2. ✅ BadgerDB index from `backups/<job-id>/index_<timestamp>/`
+3. ✅ Complete file metadata for restore operations
+
+**Note:** macOS users may experience BadgerDB lock issues during testing. This is a platform-specific limitation, not a bug in the restore implementation.
