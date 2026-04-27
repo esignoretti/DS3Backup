@@ -98,7 +98,7 @@ Example:
 		if err != nil {
 			return fmt.Errorf("failed to open index: %w", err)
 		}
-		defer indexDB.Close()
+		// Don't use defer - we'll close explicitly with proper cleanup
 
 		// Create backup engine
 		engine := backup.NewBackupEngine(cfg, s3Client, indexDB, cryptoEngine)

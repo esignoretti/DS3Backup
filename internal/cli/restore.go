@@ -135,7 +135,7 @@ var restoreRunCmd = &cobra.Command{
 			return runDryRun(engine, jobID, opts)
 		}
 
-		return runRestore(engine, jobID, opts)
+		return runRestore(engine, jobID, indexDB, opts)
 	},
 }
 
@@ -308,19 +308,11 @@ func runDryRunWithEntries(engine *restore.RestoreEngine, jobID string, opts *mod
 	return nil
 }
 
-func runRestore(engine *restore.RestoreEngine, jobID string, opts *models.RestoreOptions) error {
+func runRestore(engine *restore.RestoreEngine, jobID string, indexDB *index.IndexDB, opts *models.RestoreOptions) error {
 	fmt.Println("🔄 Restoring files...")
 	fmt.Println()
 
 	// Get total files for progress
-	configDir, _ := config.ConfigDir()
-	indexDir := filepath.Join(configDir, "index", jobID)
-	indexDB, err := index.OpenIndexDB(indexDir)
-	if err != nil {
-		return err
-	}
-	defer indexDB.Close()
-
 	entries, err := indexDB.GetAllEntries(jobID)
 	if err != nil {
 		return err
