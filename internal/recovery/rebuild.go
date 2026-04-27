@@ -185,9 +185,13 @@ func (e *RebuildEngine) RebuildIndex(ctx context.Context, job JobMetadata) error
 	}
 	defer idx.Close()
 
-	// Note: BadgerDB restore would go here
-	// For now, we just note that the data is available
-	fmt.Printf("    Index data downloaded to %s\n", indexDir)
+	if err := idx.Restore(tempDir); err != nil {
+		return fmt.Errorf("failed to restore BadgerDB: %w", err)
+	}
+	fmt.Printf("    ✓ BadgerDB restored from %s\n", filepath.Base(latestIndex))
+	
+	// Cleanup temp directory
+	os.RemoveAll(tempDir)
 	
 	return nil
 }
