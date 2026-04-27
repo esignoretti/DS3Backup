@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -277,9 +279,28 @@ func (e *RestoreEngine) getDestinationPath(entry *models.FileEntry, opts *models
 	return filepath.Join(opts.DestinationPath, entry.Path)
 }
 
-// matchPattern checks if a path matches a glob pattern
-// matchPattern checks if a path matches a glob pattern
+// matchPattern checks if a path matches a glob pattern with ** support
 func matchPattern(path, pattern string) bool {
+	// Handle ** (globstar) pattern for recursive matching
+	if strings.Contains(pattern, "**") {
+		// First escape all regex special chars except * and ?
+		regexPattern := regexp.QuoteMeta(pattern)
+		// Then convert escaped ** to match any path
+		regexPattern = strings.ReplaceAll(regexPattern, `\*\*/`, `(?:.*/)?`)
+		regexPattern = strings.ReplaceAll(regexPattern, `\*\*`, `.*`)
+		// Convert escaped * to match single segment
+		regexPattern = strings.ReplaceAll(regexPattern, `\*`, `[^/]*`)
+		regexPattern = strings.ReplaceAll(regexPattern, `\?`, `.`)
+		regexPattern = "^" + regexPattern + "$"
+		
+		matched, err := regexp.MatchString(regexPattern, path)
+		if err != nil {
+			return false
+		}
+		return matched
+	}
+	
+	// Simple glob pattern
 	matched, err := filepath.Match(pattern, path)
 	if err != nil {
 		return false

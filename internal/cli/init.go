@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/rand"
 	"fmt"
 	"log"
 	"syscall"
@@ -112,8 +113,15 @@ With --rebuild flag:
 			fmt.Println("✓ Master password configured")
 		}
 
+		// Generate encryption salt
+		salt := make([]byte, 16)
+		if _, err := rand.Read(salt); err != nil {
+			return fmt.Errorf("failed to generate salt: %w", err)
+		}
+
 		// Create config
 		cfg := config.DefaultConfig()
+		cfg.Encryption.Salt = salt
 		cfg.S3 = s3Cfg
 		cfg.ObjectLock.Mode = objectLock
 		cfg.ObjectLock.DefaultRetentionDays = retentionDays
