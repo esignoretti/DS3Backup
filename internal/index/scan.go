@@ -96,10 +96,12 @@ func (db *IndexDB) GetChangedFiles(currentFiles []models.FileEntry, jobID string
 	return changed, nil
 }
 
-// GetUniqueFilesToBackup filters out duplicate files (by hash)
-func (db *IndexDB) GetUniqueFilesToBackup(entries []models.FileEntry) []models.FileEntry {
+// GetUniqueFilesToBackup filters out duplicate files (by hash) and returns both unique and duplicate entries
+// All entries (including duplicates) should be saved to the index
+func (db *IndexDB) GetUniqueFilesToBackup(entries []models.FileEntry) ([]models.FileEntry, []models.FileEntry) {
 	seen := make(map[string]*models.FileEntry)
 	unique := make([]models.FileEntry, 0, len(entries))
+	allEntries := make([]models.FileEntry, 0, len(entries))
 
 	for i := range entries {
 		entry := &entries[i]
@@ -115,9 +117,10 @@ func (db *IndexDB) GetUniqueFilesToBackup(entries []models.FileEntry) []models.F
 			seen[hashKey] = entry
 			unique = append(unique, *entry)
 		}
+		allEntries = append(allEntries, *entry)
 	}
 
-	return unique
+	return unique, allEntries
 }
 
 // shouldSkip determines if a file should be skipped during scanning

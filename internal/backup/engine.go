@@ -92,7 +92,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 
 	// Step 3: Deduplication
 	log.Println("Checking for duplicates...")
-	uniqueFiles := e.indexDB.GetUniqueFilesToBackup(entries)
+	uniqueFiles, allEntries := e.indexDB.GetUniqueFilesToBackup(entries)
 	duplicates := len(entries) - len(uniqueFiles)
 	if duplicates > 0 {
 		log.Printf("Skipped %d duplicate files", duplicates)
@@ -203,11 +203,30 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 		}
 	}
 	
-	// Save ALL entries to index (both large files and batched files)
-	log.Printf("Saving %d entries to index...", len(uniqueFiles))
+	// Save ALL entries to index (including duplicates)
+	// First, update allEntries with the uploaded S3 keys from uniqueFiles
+	uniqueMap := make(map[string]*models.FileEntry)
 	for i := range uniqueFiles {
-		if err := e.indexDB.SaveEntry(&uniqueFiles[i]); err != nil {
-			log.Printf("WARNING: Failed to save index entry for %s: %v", uniqueFiles[i].Path, err)
+		uniqueMap[uniqueFiles[i].Path] = &uniqueFiles[i]
+	}
+	
+	// Update allEntries with uploaded metadata
+	for i := range allEntries {
+		if unique, exists := uniqueMap[allEntries[i].Path]; exists {
+			// Copy updated metadata from uniqueFiles
+			allEntries[i].S3Key = unique.S3Key
+			allEntries[i].IsInBatch = unique.IsInBatch
+			allEntries[i].BatchID = unique.BatchID
+			allEntries[i].OffsetInBatch = unique.OffsetInBatch
+			allEntries[i].LengthInBatch = unique.LengthInBatch
+			allEntries[i].CompressedSize = unique.CompressedSize
+		}
+	}
+	
+	log.Printf("Saving %d entries to index...", len(allEntries))
+	for i := range allEntries {
+		if err := e.indexDB.SaveEntry(&allEntries[i]); err != nil {
+			log.Printf("WARNING: Failed to save index entry for %s: %v", allEntries[i].Path, err)
 		}
 	}
 
