@@ -202,11 +202,19 @@ func (c *Client) ListObjects(ctx context.Context, prefix string) ([]string, erro
 }
 
 // DeleteObject deletes an object from S3
-func (c *Client) DeleteObject(ctx context.Context, key string) error {
-	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+// For GOVERNANCE mode objects, set bypassGovernance to true
+func (c *Client) DeleteObject(ctx context.Context, key string, bypassGovernance ...bool) error {
+	input := &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
-	})
+	}
+	
+	// Optionally bypass GOVERNANCE retention
+	if len(bypassGovernance) > 0 && bypassGovernance[0] {
+		input.BypassGovernanceRetention = aws.Bool(true)
+	}
+	
+	_, err := c.client.DeleteObject(ctx, input)
 	return err
 }
 

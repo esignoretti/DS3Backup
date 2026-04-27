@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/esignoretti/ds3backup/internal/s3client"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -16,6 +18,7 @@ var (
 	jobRetention int
 	jobLockMode  string
 	jobPassword  string
+	jobClean     bool
 )
 
 // jobCmd represents the job command
@@ -135,6 +138,10 @@ var jobListCmd = &cobra.Command{
 var jobDeleteCmd = &cobra.Command{
 	Use:   "delete <job-id>",
 	Short: "Delete a backup job",
+	Long: `Delete a backup job configuration.
+
+With --clean flag, also removes all backup files from S3.
+If files are protected by Object Lock, deletion will fail with an error.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
@@ -143,6 +150,80 @@ var jobDeleteCmd = &cobra.Command{
 		}
 
 		jobID := args[0]
+		job := cfg.GetJob(jobID)
+		if job == nil {
+			return fmt.Errorf("job not found: %s", jobID)
+		}
+
+		// Optionally clean up S3 files
+		if jobClean {
+			fmt.Printf("Cleaning up S3 files for job %s...\n", jobID)
+			
+			// Create S3 client
+			s3Client, err := s3client.NewClient(cfg.S3)
+			if err != nil {
+				return fmt.Errorf("failed to create S3 client: %w", err)
+			}
+
+			// List all files for this job
+			prefix := fmt.Sprintf("backups/%s/", jobID)
+			objects, err := s3Client.ListObjects(cmd.Context(), prefix)
+			if err != nil {
+				return fmt.Errorf("failed to list objects: %w", err)
+			}
+
+			if len(objects) == 0 {
+				fmt.Println("No S3 files found for this job.")
+			} else {
+				fmt.Printf("Found %d objects to delete...\n", len(objects))
+				
+				// Try to delete each object
+				// For GOVERNANCE mode, we can bypass retention
+				// For COMPLIANCE mode, deletion will fail (as expected)
+				deletedCount := 0
+				failedCount := 0
+				lockedCount := 0
+				
+				// Try with bypass first (for GOVERNANCE mode)
+				for _, key := range objects {
+					err := s3Client.DeleteObject(cmd.Context(), key, true) // bypassGovernance=true
+					if err != nil {
+						// Check if it's an Object Lock error (COMPLIANCE mode)
+						errStr := err.Error()
+						if strings.Contains(errStr, "Compliance") ||
+						   strings.Contains(errStr, "AccessDenied") ||
+						   strings.Contains(errStr, "InvalidRequest") {
+							lockedCount++
+							fmt.Printf("  🔒 Object locked (COMPLIANCE mode): %s\n", key)
+						} else {
+							failedCount++
+							fmt.Printf("  ❌ Failed to delete: %s (%v)\n", key, err)
+						}
+					} else {
+						deletedCount++
+					}
+				}
+				
+				fmt.Printf("\nDeletion summary:\n")
+				fmt.Printf("  ✅ Deleted: %d objects\n", deletedCount)
+				if failedCount > 0 {
+					fmt.Printf("  ❌ Failed: %d objects\n", failedCount)
+				}
+				if lockedCount > 0 {
+					fmt.Printf("  🔒 Locked: %d objects (protected by COMPLIANCE Object Lock)\n", lockedCount)
+					return fmt.Errorf("cannot delete %d objects: protected by COMPLIANCE Object Lock", lockedCount)
+				}
+			}
+			
+			// Also delete index files from S3
+			indexPrefix := fmt.Sprintf(".ds3backup/index/%s/", jobID)
+			indexObjects, _ := s3Client.ListObjects(cmd.Context(), indexPrefix)
+			for _, key := range indexObjects {
+				_ = s3Client.DeleteObject(cmd.Context(), key, true)
+			}
+		}
+
+		// Delete job from config
 		if !cfg.RemoveJob(jobID) {
 			return fmt.Errorf("job not found: %s", jobID)
 		}
@@ -151,7 +232,12 @@ var jobDeleteCmd = &cobra.Command{
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
-		fmt.Printf("✓ Job %s deleted successfully\n", jobID)
+		if jobClean {
+			fmt.Printf("✓ Job %s deleted successfully (including S3 files)\n", jobID)
+		} else {
+			fmt.Printf("✓ Job %s deleted successfully\n", jobID)
+			fmt.Printf("  Note: S3 backup files not deleted. Use --clean to remove them.\n")
+		}
 		return nil
 	},
 }
@@ -171,6 +257,8 @@ func init() {
 	jobAddCmd.MarkFlagRequired("name")
 	jobAddCmd.MarkFlagRequired("path")
 	jobAddCmd.MarkFlagRequired("password")
+
+	jobDeleteCmd.Flags().BoolVar(&jobClean, "clean", false, "Also delete all S3 backup files for this job")
 }
 
 // expandPath expands ~ to home directory
