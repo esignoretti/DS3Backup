@@ -23,7 +23,6 @@ import (
 var (
 	fullBackup   bool
 	jsonOutput   bool
-	backupPassword string
 )
 
 // backupCmd represents the backup command
@@ -79,11 +78,11 @@ Example:
 			return fmt.Errorf("failed to create S3 client: %w", err)
 		}
 
-		// Create crypto engine
-		if backupPassword == "" {
-			return fmt.Errorf("password required for backup (use --password flag)")
+		// Create crypto engine using job's stored password
+		if job.EncryptionPassword == "" {
+			return fmt.Errorf("no encryption password configured for job %s", jobID)
 		}
-		cryptoEngine, err := crypto.NewCryptoEngine(backupPassword, cfg.Encryption.Salt)
+		cryptoEngine, err := crypto.NewCryptoEngine(job.EncryptionPassword, cfg.Encryption.Salt)
 		if err != nil {
 			return fmt.Errorf("failed to create crypto engine: %w", err)
 		}
@@ -228,7 +227,6 @@ func init() {
 
 	backupRunCmd.Flags().BoolVar(&fullBackup, "full", false, "Force full backup")
 	backupRunCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
-	backupRunCmd.Flags().StringVar(&backupPassword, "password", "", "Encryption password (required for backup)")
 }
 
 var (

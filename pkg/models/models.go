@@ -6,16 +6,17 @@ import (
 
 // BackupJob represents a backup job configuration
 type BackupJob struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	SourcePath     string    `json:"sourcePath"`
-	RetentionDays  int       `json:"retentionDays"`
-	ObjectLockMode string    `json:"objectLockMode"` // "GOVERNANCE" or "COMPLIANCE"
-	Enabled        bool      `json:"enabled"`
-	CreatedAt      time.Time `json:"createdAt"`
-	LastRun        *time.Time `json:"lastRun,omitempty"`
-	NextRun        time.Time `json:"nextRun"`
-	LastError      string    `json:"lastError,omitempty"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	SourcePath       string    `json:"sourcePath"`
+	RetentionDays    int       `json:"retentionDays"`
+	ObjectLockMode   string    `json:"objectLockMode"` // "GOVERNANCE" or "COMPLIANCE"
+	Enabled          bool      `json:"enabled"`
+	EncryptionPassword string  `json:"encryptionPassword"` // Stored in config (ensure file permissions are secure)
+	CreatedAt        time.Time `json:"createdAt"`
+	LastRun          *time.Time `json:"lastRun,omitempty"`
+	NextRun          time.Time `json:"nextRun"`
+	LastError        string    `json:"lastError,omitempty"`
 }
 
 // FileEntry represents a file in the backup index

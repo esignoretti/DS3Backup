@@ -15,6 +15,7 @@ var (
 	jobPath      string
 	jobRetention int
 	jobLockMode  string
+	jobPassword  string
 )
 
 // jobCmd represents the job command
@@ -54,13 +55,19 @@ Example:
 			return fmt.Errorf("invalid lock mode: %s (must be GOVERNANCE, COMPLIANCE, or NONE)", jobLockMode)
 		}
 
+		// Validate password
+		if jobPassword == "" {
+			return fmt.Errorf("encryption password is required (--password flag)")
+		}
+
 		// Create job
 		job := models.BackupJob{
-			Name:           jobName,
-			SourcePath:     absPath,
-			RetentionDays:  jobRetention,
-			ObjectLockMode: jobLockMode,
-			Enabled:        true,
+			Name:             jobName,
+			SourcePath:       absPath,
+			RetentionDays:    jobRetention,
+			ObjectLockMode:   jobLockMode,
+			EncryptionPassword: jobPassword,
+			Enabled:          true,
 		}
 
 		cfg.AddJob(job)
@@ -83,6 +90,7 @@ Example:
 		fmt.Printf("  Retention: %d days\n", savedJob.RetentionDays)
 		fmt.Printf("  Object Lock: %s\n", savedJob.ObjectLockMode)
 		fmt.Printf("\nRun backup with: ds3backup backup run %s\n", savedJob.ID)
+		fmt.Printf("Note: Encryption password is stored with the job configuration.\n")
 
 		return nil
 	},
@@ -158,9 +166,11 @@ func init() {
 	jobAddCmd.Flags().StringVarP(&jobPath, "path", "p", "", "Directory path to backup")
 	jobAddCmd.Flags().IntVarP(&jobRetention, "retention", "r", 30, "Retention period in days")
 	jobAddCmd.Flags().StringVar(&jobLockMode, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
+	jobAddCmd.Flags().StringVar(&jobPassword, "password", "", "Encryption password (required)")
 
 	jobAddCmd.MarkFlagRequired("name")
 	jobAddCmd.MarkFlagRequired("path")
+	jobAddCmd.MarkFlagRequired("password")
 }
 
 // expandPath expands ~ to home directory
