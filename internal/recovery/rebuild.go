@@ -132,7 +132,7 @@ func (e *RebuildEngine) DiscoverJobs(ctx context.Context) ([]JobMetadata, error)
 
 // downloadJobMetadata downloads and decrypts job metadata from S3
 func (e *RebuildEngine) downloadJobMetadata(ctx context.Context, jobID string) (JobMetadata, error) {
-	key := fmt.Sprintf(".ds3backup/jobs/%s/config.json.enc", jobID)
+	key := fmt.Sprintf(".ds3backup/jobs/%s/config.json", jobID)
 	
 	data, err := e.s3client.GetObject(ctx, key)
 	if err != nil {
@@ -145,7 +145,7 @@ func (e *RebuildEngine) downloadJobMetadata(ctx context.Context, jobID string) (
 	if e.masterPassword != "" {
 		decrypted, err := crypto.DecryptWithMasterPassword(string(data), e.masterPassword)
 		if err != nil {
-			return JobMetadata{}, fmt.Errorf("failed to decrypt job config (wrong master password?): %w", err)
+					return JobMetadata{}, fmt.Errorf("failed to decrypt job config (wrong master password?): %w", err)
 		}
 		if err := json.Unmarshal(decrypted, &metadata); err != nil {
 			return JobMetadata{}, fmt.Errorf("failed to parse job config: %w", err)
@@ -248,21 +248,9 @@ func SaveJobMetadata(ctx context.Context, s3client *s3client.Client, job models.
 		return err
 	}
 
-	// Encrypt entire config if master password is set
-	var encryptedData []byte
-	if masterPassword != "" {
-		encryptedStr, err := crypto.EncryptWithMasterPassword(data, masterPassword)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt job metadata: %w", err)
-		}
-		encryptedData = []byte(encryptedStr)
-	} else {
-		encryptedData = data
-	}
-
-	// Upload to S3
-	key := fmt.Sprintf(".ds3backup/jobs/%s/config.json.enc", job.ID)
-	return s3client.PutObject(ctx, key, encryptedData)
+	// Upload to S3 (metadata is not encrypted, only the job password field inside is encrypted)
+	key := fmt.Sprintf(".ds3backup/jobs/%s/config.json", job.ID)
+	return s3client.PutObject(ctx, key, data)
 }
 
 // RunRebuild executes the rebuild process
