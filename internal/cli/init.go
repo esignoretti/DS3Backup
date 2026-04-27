@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/esignoretti/ds3backup/internal/config"
-	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/s3client"
 )
 
@@ -14,19 +13,20 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize DS3 Backup with S3 target",
-	Long: `Initialize DS3 Backup by configuring S3 connection and encryption.
+	Long: `Initialize DS3 Backup by configuring S3 connection.
 
 This command will:
   1. Validate S3 credentials and bucket access
   2. Check Object Lock support
-  3. Set up encryption with your password
-  4. Create initial configuration file`,
+  3. Create initial configuration file
+
+Note: Encryption password is specified during backup/restore operations, not during initialization.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println("Initializing DS3 Backup...")
 
 		// Validate parameters
-		if endpoint == "" || bucket == "" || accessKey == "" || secretKey == "" || password == "" {
-			return fmt.Errorf("missing required parameters:\n  --endpoint, --bucket, --access-key, --secret-key, --password are required")
+		if endpoint == "" || bucket == "" || accessKey == "" || secretKey == "" {
+			return fmt.Errorf("missing required parameters:\n  --endpoint, --bucket, --access-key, --secret-key are required")
 		}
 
 		if objectLock != "GOVERNANCE" && objectLock != "COMPLIANCE" && objectLock != "NONE" {
@@ -61,18 +61,9 @@ This command will:
 			fmt.Println("✓ Object Lock supported")
 		}
 
-		// Create encryption engine to validate password
-		fmt.Println("Setting up encryption...")
-		cryptoEngine, err := crypto.NewCryptoEngine(password, nil)
-		if err != nil {
-			return fmt.Errorf("failed to setup encryption: %w", err)
-		}
-		fmt.Println("✓ Encryption configured")
-
 		// Create config
 		cfg := config.DefaultConfig()
 		cfg.S3 = s3Cfg
-		cfg.Encryption.Salt = cryptoEngine.GetSalt()
 		cfg.ObjectLock.Mode = objectLock
 		cfg.ObjectLock.DefaultRetentionDays = retentionDays
 
@@ -109,13 +100,11 @@ func init() {
 	initCmd.Flags().StringVar(&accessKey, "access-key", "", "S3 access key")
 	initCmd.Flags().StringVar(&secretKey, "secret-key", "", "S3 secret key")
 	initCmd.Flags().StringVar(&region, "region", "us-east-1", "S3 region")
-	initCmd.Flags().StringVar(&password, "password", "", "Encryption password")
-	initCmd.Flags().StringVar(&objectLock, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
+	initCmd.Flags().StringVar(&objectLock, "object-lock-mode", "GOVERNANCE", "Object lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
 	initCmd.Flags().IntVar(&retentionDays, "retention-days", 30, "Default retention period in days")
 
 	initCmd.MarkFlagRequired("endpoint")
 	initCmd.MarkFlagRequired("bucket")
 	initCmd.MarkFlagRequired("access-key")
 	initCmd.MarkFlagRequired("secret-key")
-	initCmd.MarkFlagRequired("password")
 }
