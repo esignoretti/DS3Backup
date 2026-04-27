@@ -188,6 +188,7 @@ func init() {
 	initCmd.Flags().IntVar(&retentionDays, "retention-days", 30, "Default retention period in days")
 	initCmd.Flags().StringVar(&masterPassword, "master-password", "", "Master password for encrypting job configs")
 	initCmd.Flags().BoolVar(&rebuild, "rebuild", false, "Rebuild configuration from S3 backup metadata")
+	initCmd.Flags().StringVar(&jobPassword, "job-password", "", "Job password for all recovered jobs (optional, skips interactive prompt)")
 
 	initCmd.MarkFlagRequired("endpoint")
 	initCmd.MarkFlagRequired("bucket")
@@ -235,7 +236,7 @@ func runRebuild(cmd *cobra.Command) error {
 
 	// Run rebuild
 	ctx := cmd.Context()
-	if err := recovery.RunRebuild(ctx, client, masterPassword); err != nil {
+	if err := recovery.RunRebuild(ctx, client, masterPassword, jobPassword); err != nil {
 		return fmt.Errorf("rebuild failed: %w", err)
 	}
 

@@ -138,22 +138,10 @@ func (e *RebuildEngine) downloadJobMetadata(ctx context.Context, jobID string) (
 	if err != nil {
 			return JobMetadata{}, err
 	}
-	fmt.Printf("    Downloaded %d bytes\n", len(data))
-
-	// Decrypt if master password is set
+	// Parse metadata (stored unencrypted on S3)
 	var metadata JobMetadata
-	if e.masterPassword != "" {
-		decrypted, err := crypto.DecryptWithMasterPassword(string(data), e.masterPassword)
-		if err != nil {
-					return JobMetadata{}, fmt.Errorf("failed to decrypt job config (wrong master password?): %w", err)
-		}
-		if err := json.Unmarshal(decrypted, &metadata); err != nil {
-			return JobMetadata{}, fmt.Errorf("failed to parse job config: %w", err)
-		}
-	} else {
-		if err := json.Unmarshal(data, &metadata); err != nil {
-			return JobMetadata{}, fmt.Errorf("failed to parse job config: %w", err)
-		}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return JobMetadata{}, fmt.Errorf("failed to parse job config: %w", err)
 	}
 
 	return metadata, nil
@@ -254,7 +242,7 @@ func SaveJobMetadata(ctx context.Context, s3client *s3client.Client, job models.
 }
 
 // RunRebuild executes the rebuild process
-func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword string) error {
+func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword string, jobPassword string) error {
 	fmt.Println("Loading encryption salt from S3...")
 	
 	// Load encryption salt
@@ -283,20 +271,28 @@ func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword s
 	}
 	fmt.Println()
 
-	// Get passwords for jobs that need them
+	// Get passwords for jobs
 	jobPasswords := make(map[string]string)
 	for _, job := range jobs {
+		// Try to decrypt with master password first
 		if job.EncryptedPassword != "" && masterPassword != "" {
-			// Try to decrypt with master password
 			decrypted, err := crypto.DecryptWithMasterPassword(job.EncryptedPassword, masterPassword)
 			if err == nil {
 				jobPasswords[job.ID] = string(decrypted)
 				fmt.Printf("  ✓ Decrypted password for %s\n", job.Name)
 				continue
 			}
+			fmt.Printf("  ⚠️  Could not decrypt password for %s: %v\n", job.Name, err)
 		}
 		
-		// Prompt for password
+		// Use provided job password if available
+		if jobPassword != "" {
+			jobPasswords[job.ID] = jobPassword
+			fmt.Printf("  ✓ Using provided password for %s\n", job.Name)
+			continue
+		}
+		
+		// Prompt for password (interactive mode)
 		fmt.Printf("Enter password for %s (%s): ", job.Name, job.ID)
 		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 		if err != nil {
