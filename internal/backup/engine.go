@@ -232,12 +232,22 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 		}
 	}
 
-	// Step 6: Sync index to S3
+	// Step 6: Sync index to S3 (central location)
 	log.Println("Syncing index to S3...")
 	err = e.syncIndexToS3(job.ID)
 	if err != nil {
-		log.Printf("WARNING: Index sync failed: %v (backup successful, index can rebuild)", err)
+		log.Printf("WARNING: Failed to sync index to S3: %v", err)
 		run.IndexSyncFailed = true
+	}
+
+	// Step 7: Save index copy alongside backup files (for disaster recovery)
+	log.Println("Saving index copy with backup files...")
+	err = e.saveIndexCopyWithBackup(job.ID, run.RunTime)
+	if err != nil {
+		log.Printf("WARNING: Failed to save index copy: %v", err)
+		run.IndexSyncFailed = true
+	} else {
+		log.Println("✓ Index copy saved")
 	}
 
 	// Step 7: Apply retention
@@ -270,6 +280,40 @@ func (e *BackupEngine) syncIndexToS3(jobID string) error {
 
 		relPath, _ := filepath.Rel(backupDir, path)
 		s3Key := fmt.Sprintf(".ds3backup/index/%s/%s", jobID, relPath)
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		ctx := context.Background()
+		return e.s3client.PutObject(ctx, s3Key, data)
+	})
+}
+
+// saveIndexCopyWithBackup saves a copy of the index alongside backup files
+// This allows restoring from a specific backup snapshot without relying on central index
+func (e *BackupEngine) saveIndexCopyWithBackup(jobID string, backupTime time.Time) error {
+	// Export BadgerDB to temp directory
+	backupDir := "/tmp/ds3backup-index-copy-" + jobID
+	if err := e.indexDB.Backup(backupDir); err != nil {
+		return fmt.Errorf("failed to backup index: %w", err)
+	}
+	defer os.RemoveAll(backupDir)
+
+	// Upload all index files to backup location
+	timestamp := backupTime.Format("20060102_150405")
+	return filepath.Walk(backupDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(backupDir, path)
+		// Save in backups/<job-id>/index_<timestamp>/ to keep with backup files
+		s3Key := fmt.Sprintf("backups/%s/index_%s/%s", jobID, timestamp, relPath)
 
 		data, err := os.ReadFile(path)
 		if err != nil {
