@@ -1,0 +1,84 @@
+=== DS3Backup Disaster Recovery Feature - Test Results ===
+Test Date: 2026-04-27
+Tester: Automated Test Suite
+Binary: ./ds3backup (28MB, macOS arm64)
+Commit: a94add9
+
+=== Test 1: Binary Execution ===
+Command: ./ds3backup --version
+Result: ✅ PASS
+Output: ds3backup version 0.0.5
+
+=== Test 2: Init Command Help ===
+Command: ./ds3backup init --help
+Result: ✅ PASS
+Features Verified:
+  - Master password flag present
+  - Rebuild flag present
+  - Help text mentions disaster recovery
+
+=== Test 3: Job Add Command ===
+Command: ./ds3backup job add --help
+Result: ✅ PASS
+Features Verified:
+  - Password flag present (required)
+  - Object lock mode flag present (default: NONE)
+
+=== Test 4: Job Delete Command ===
+Command: ./ds3backup job delete --help
+Result: ✅ PASS
+Features Verified:
+  - Clean flag present
+  - Help mentions Object Lock error handling
+
+=== Test 5: Local Job Creation ===
+Command: ./ds3backup job add --name="TestLocal" --path=/tmp --password="test123"
+Result: ✅ PASS
+Output: Job created successfully with ID job_1777302334932342000
+Verified: Job saved to ~/.ds3backup/config.json with encryption password
+
+=== Test 6: Init with Master Password (Non-Interactive) ===
+Status: ⚠️  REQUIRES S3 CREDENTIALS
+Command: ./ds3backup init --endpoint=... --bucket=... --access-key=... --secret-key=... --master-password="TestMaster123"
+Expected: Master password checksum stored in config
+
+=== Test 7: Job Metadata Save to S3 ===
+Status: ⚠️  REQUIRES S3 CREDENTIALS
+Command: ./ds3backup job add --name="TestS3" --path=/tmp --password="JobPass123"
+Expected: Metadata saved to .ds3backup/jobs/<job-id>/config.json.enc
+
+=== Test 8: Backup with Index Copy ===
+Status: ⚠️  REQUIRES S3 CREDENTIALS
+Command: ./ds3backup backup run <job-id>
+Expected: Index copy saved to backups/<job-id>/index_<timestamp>/
+
+=== Test 9: Retirement Marker Creation ===
+Status: ⚠️  REQUIRES COMPLIANCE OBJECT LOCK
+Command: ./ds3backup job delete <compliance-job-id> --clean
+Expected: Retirement marker created on S3
+
+=== Test 10: Rebuild Command ===
+Status: ⚠️  REQUIRES S3 CREDENTIALS + BACKUP DATA
+Command: ./ds3backup init --rebuild
+Expected: Jobs discovered, indexes rebuilt, config restored
+
+=== Summary ===
+Tests Passed: 5/10 (50%)
+Tests Requiring S3: 5/10 (50%)
+Tests Requiring COMPLIANCE: 1/10 (10%)
+
+All local tests passed successfully!
+S3 integration tests require valid credentials.
+
+=== Next Steps ===
+1. Test with real S3 credentials
+2. Verify job metadata encryption on S3
+3. Test rebuild with actual backup data
+4. Test retirement marker with COMPLIANCE mode
+5. Verify BadgerDB index restore functionality
+
+=== Known Issues ===
+1. BadgerDB full restore not implemented (downloads index but doesn't fully restore DB)
+2. Master password must be entered manually during rebuild
+3. Existing jobs won't have metadata on S3
+

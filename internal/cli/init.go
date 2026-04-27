@@ -153,8 +153,20 @@ With --rebuild flag:
 func init() {
 	rootCmd.AddCommand(initCmd)
 
+	initCmd.Flags().StringVar(&endpoint, "endpoint", "", "S3 endpoint (e.g., s3.cubbit.eu)")
+	initCmd.Flags().StringVar(&bucket, "bucket", "", "S3 bucket name")
+	initCmd.Flags().StringVar(&accessKey, "access-key", "", "S3 access key")
+	initCmd.Flags().StringVar(&secretKey, "secret-key", "", "S3 secret key")
+	initCmd.Flags().StringVar(&region, "region", "us-east-1", "S3 region")
+	initCmd.Flags().StringVar(&objectLock, "object-lock-mode", "NONE", "Object lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
+	initCmd.Flags().IntVar(&retentionDays, "retention-days", 30, "Default retention period in days")
 	initCmd.Flags().StringVar(&masterPassword, "master-password", "", "Master password for encrypting job configs")
 	initCmd.Flags().BoolVar(&rebuild, "rebuild", false, "Rebuild configuration from S3 backup metadata")
+
+	initCmd.MarkFlagRequired("endpoint")
+	initCmd.MarkFlagRequired("bucket")
+	initCmd.MarkFlagRequired("access-key")
+	initCmd.MarkFlagRequired("secret-key")
 }
 
 // runRebuild executes the rebuild process
