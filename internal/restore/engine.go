@@ -447,6 +447,36 @@ func (e *RestoreEngine) RestoreEntries(jobID string, opts *models.RestoreOptions
 
 	var mu sync.Mutex
 
+	// Collect results in separate goroutine to prevent deadlock
+	done := make(chan struct{})
+	go func() {
+		for res := range downloader.Results() {
+			if res.Skipped {
+				mu.Lock()
+				result.FilesSkipped++
+				mu.Unlock()
+				tracker.Update(res.Entry.Path, res.Bytes, true)
+			} else if res.Success {
+				mu.Lock()
+				result.FilesRestored++
+				result.BytesRestored += res.Bytes
+				if len(res.Warnings) > 0 {
+					result.Warnings = append(result.Warnings, res.Warnings...)
+				}
+				mu.Unlock()
+				tracker.Update(res.Entry.Path, res.Bytes, false)
+			} else {
+				mu.Lock()
+				result.FilesFailed++
+				if res.Error != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+				}
+				mu.Unlock()
+			}
+		}
+		close(done)
+	}()
+
 	// Submit jobs
 	for _, entry := range filesToRestore {
 		destPath := e.getDestinationPath(entry, opts)
@@ -460,32 +490,7 @@ func (e *RestoreEngine) RestoreEntries(jobID string, opts *models.RestoreOptions
 	}
 
 	downloader.Stop()
-
-	// Collect results
-	for res := range downloader.Results() {
-		if res.Skipped {
-			mu.Lock()
-			result.FilesSkipped++
-			mu.Unlock()
-			tracker.Update(res.Entry.Path, res.Bytes, true)
-		} else if res.Success {
-			mu.Lock()
-			result.FilesRestored++
-			result.BytesRestored += res.Bytes
-			if len(res.Warnings) > 0 {
-				result.Warnings = append(result.Warnings, res.Warnings...)
-			}
-			mu.Unlock()
-			tracker.Update(res.Entry.Path, res.Bytes, false)
-		} else {
-			mu.Lock()
-			result.FilesFailed++
-			if res.Error != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
-			}
-			mu.Unlock()
-		}
-	}
+	<-done // Wait for result collection to complete
 
 	return result, nil
 }
