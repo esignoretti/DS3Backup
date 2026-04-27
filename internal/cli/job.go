@@ -251,7 +251,7 @@ func init() {
 	jobAddCmd.Flags().StringVarP(&jobName, "name", "n", "", "Job name")
 	jobAddCmd.Flags().StringVarP(&jobPath, "path", "p", "", "Directory path to backup")
 	jobAddCmd.Flags().IntVarP(&jobRetention, "retention", "r", 30, "Retention period in days")
-	jobAddCmd.Flags().StringVar(&jobLockMode, "object-lock-mode", "GOVERNANCE", "Object Lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
+	jobAddCmd.Flags().StringVar(&jobLockMode, "object-lock-mode", "NONE", "Object Lock mode (GOVERNANCE, COMPLIANCE, or NONE)")
 	jobAddCmd.Flags().StringVar(&jobPassword, "password", "", "Encryption password (required)")
 
 	jobAddCmd.MarkFlagRequired("name")
