@@ -26,12 +26,13 @@ type RestoreEngine struct {
 }
 
 // NewRestoreEngine creates a new restore engine
-func NewRestoreEngine(cfg *config.Config, s3 *s3client.Client, idx *index.IndexDB, cryptoEngine *crypto.CryptoEngine) *RestoreEngine {
+func NewRestoreEngine(cfg *config.Config, s3 *s3client.Client, idx *index.IndexDB, cryptoEngine *crypto.CryptoEngine, jobID string) *RestoreEngine {
 	return &RestoreEngine{
-		config:   cfg,
-		s3client: s3,
-		indexDB:  idx,
-		crypto:   cryptoEngine,
+		config:    cfg,
+		s3client:  s3,
+		indexDB:   idx,
+		crypto:    cryptoEngine,
+		extractor: NewBatchExtractor(s3, jobID),
 	}
 }
 

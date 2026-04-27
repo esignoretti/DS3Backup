@@ -110,7 +110,7 @@ var restoreRunCmd = &cobra.Command{
 		defer indexDB.Close()
 
 		// Create restore engine
-		engine := restore.NewRestoreEngine(cfg, s3Client, indexDB, cryptoEngine)
+		engine := restore.NewRestoreEngine(cfg, s3Client, indexDB, cryptoEngine, jobID)
 
 		// Restore options
 		opts := &models.RestoreOptions{
@@ -575,7 +575,7 @@ var restoreResumeCmd = &cobra.Command{
 		defer indexDB.Close()
 
 		// Create restore engine
-		engine := restore.NewRestoreEngine(cfg, s3Client, indexDB, cryptoEngine)
+		engine := restore.NewRestoreEngine(cfg, s3Client, indexDB, cryptoEngine, jobID)
 
 		// Restore options
 		opts := &models.RestoreOptions{
