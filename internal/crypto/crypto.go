@@ -100,11 +100,13 @@ func (e *CryptoEngine) CompressAndEncrypt(content []byte) (*EncryptedFile, error
 		return nil, err
 	}
 
-	encryptedData := gcm.Seal(nonce, nonce, compressed, nil)
+	// Seal with nil dst to get clean ciphertext+tag (nonce NOT included)
+	encryptedData := gcm.Seal(nil, nonce, compressed, nil)
 	
-	// Extract components with explicit copies to avoid slice sharing
-	ciphertext := make([]byte, len(encryptedData)-gcm.NonceSize()-gcm.Overhead())
-	copy(ciphertext, encryptedData[gcm.NonceSize():len(encryptedData)-gcm.Overhead()])
+	// encryptedData now contains: ciphertext + tag
+	// Extract components
+	ciphertext := make([]byte, len(encryptedData)-gcm.Overhead())
+	copy(ciphertext, encryptedData[:len(encryptedData)-gcm.Overhead()])
 	
 	tag := make([]byte, gcm.Overhead())
 	copy(tag, encryptedData[len(encryptedData)-gcm.Overhead():])

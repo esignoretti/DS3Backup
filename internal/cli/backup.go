@@ -23,6 +23,7 @@ import (
 var (
 	fullBackup   bool
 	jsonOutput   bool
+	backupPassword string
 )
 
 // backupCmd represents the backup command
@@ -79,7 +80,10 @@ Example:
 		}
 
 		// Create crypto engine
-		cryptoEngine, err := crypto.NewCryptoEngine(password, cfg.Encryption.Salt)
+		if backupPassword == "" {
+			return fmt.Errorf("password required for backup (use --password flag)")
+		}
+		cryptoEngine, err := crypto.NewCryptoEngine(backupPassword, cfg.Encryption.Salt)
 		if err != nil {
 			return fmt.Errorf("failed to create crypto engine: %w", err)
 		}
@@ -224,6 +228,7 @@ func init() {
 
 	backupRunCmd.Flags().BoolVar(&fullBackup, "full", false, "Force full backup")
 	backupRunCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+	backupRunCmd.Flags().StringVar(&backupPassword, "password", "", "Encryption password (required for backup)")
 }
 
 var (
