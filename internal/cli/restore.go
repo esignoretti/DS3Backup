@@ -119,7 +119,7 @@ var restoreRunCmd = &cobra.Command{
 			Overwrite:       restoreOverwrite,
 			IncludePatterns: restoreInclude,
 			ExcludePatterns: restoreExclude,
-			Concurrency:     8,
+			Concurrency:     4, // Reduced from 8 due to MinIO SDK timeout issues
 		}
 
 		if restoreVerify {

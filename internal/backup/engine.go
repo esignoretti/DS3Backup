@@ -204,15 +204,17 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	}
 	
 	// Save ALL entries to index (including duplicates)
-	// First, update allEntries with the uploaded S3 keys from uniqueFiles
-	uniqueMap := make(map[string]*models.FileEntry)
+	// First, create a map from hash to unique file (for updating duplicates)
+	hashMap := make(map[string]*models.FileEntry)
 	for i := range uniqueFiles {
-		uniqueMap[uniqueFiles[i].Path] = &uniqueFiles[i]
+		hashKey := string(uniqueFiles[i].Hash)
+		hashMap[hashKey] = &uniqueFiles[i]
 	}
 	
-	// Update allEntries with uploaded metadata
+	// Update allEntries with uploaded metadata (match by hash, not path)
 	for i := range allEntries {
-		if unique, exists := uniqueMap[allEntries[i].Path]; exists {
+		hashKey := string(allEntries[i].Hash)
+		if unique, exists := hashMap[hashKey]; exists {
 			// Copy updated metadata from uniqueFiles
 			allEntries[i].S3Key = unique.S3Key
 			allEntries[i].IsInBatch = unique.IsInBatch

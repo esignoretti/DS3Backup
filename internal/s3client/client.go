@@ -2,53 +2,95 @@ package s3client
 
 import (
 	"bytes"
+	"strings"
 	"context"
 	"fmt"
-	"io"
+	"net"
+	"net/http"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/esignoretti/ds3backup/internal/config"
 )
 
-// Client wraps MinIO S3 client
+// Client wraps AWS SDK v2 S3 client
 type Client struct {
-	client     *minio.Client
+	client     *s3.Client
+	downloader *manager.Downloader
 	bucket     string
 	objectLock bool
 }
 
-// NewClient creates a new S3 client
+// NewClient creates a new S3 client with AWS SDK v2
 func NewClient(cfg config.S3Config) (*Client, error) {
-	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
-		Secure: cfg.UseSSL,
-		Region: cfg.Region,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create S3 client: %w", err)
+	// Configure HTTP client with proper timeouts
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: 2 * time.Minute,
+			ExpectContinueTimeout: 10 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+		},
 	}
 
-	// Check if bucket exists and has object lock
-	ctx := context.Background()
-	exists, err := client.BucketExists(ctx, cfg.Bucket)
+	// Load AWS config with static credentials
+	awsConfig, err := awscfg.LoadDefaultConfig(context.TODO(),
+		awscfg.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			cfg.AccessKey, cfg.SecretKey, "",
+		)),
+		awscfg.WithRegion(cfg.Region),
+		awscfg.WithHTTPClient(httpClient),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check bucket existence: %w", err)
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
-	if !exists {
-		return nil, fmt.Errorf("bucket %s does not exist", cfg.Bucket)
+
+	// Create S3 client with custom endpoint for Cubbit DS3
+	client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
+		endpoint := cfg.Endpoint
+		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+			endpoint = "https://" + endpoint
+		}
+		o.BaseEndpoint = aws.String(endpoint)
+		o.UsePathStyle = true // Required for S3-compatible endpoints
+	})
+
+	// Create downloader with 64MB parts
+	downloader := manager.NewDownloader(client, func(d *manager.Downloader) {
+		d.PartSize = 64 * 1024 * 1024
+	})
+
+	// Check if bucket exists
+	ctx := context.Background()
+	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(cfg.Bucket),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify bucket existence: %w", err)
 	}
 
 	// Check object lock support
 	objectLockEnabled := false
-	_, _, _, _, err = client.GetObjectLockConfig(ctx, cfg.Bucket)
+	_, err = client.GetObjectLockConfiguration(ctx, &s3.GetObjectLockConfigurationInput{
+		Bucket: aws.String(cfg.Bucket),
+	})
 	if err == nil {
 		objectLockEnabled = true
 	}
 
 	return &Client{
 		client:     client,
+		downloader: downloader,
 		bucket:     cfg.Bucket,
 		objectLock: objectLockEnabled,
 	}, nil
@@ -56,108 +98,104 @@ func NewClient(cfg config.S3Config) (*Client, error) {
 
 // PutObject uploads an object to S3
 func (c *Client) PutObject(ctx context.Context, key string, data []byte) error {
-	reader := bytes.NewReader(data)
-	_, err := c.client.PutObject(ctx, c.bucket, key, reader, int64(len(data)), minio.PutObjectOptions{
-		ContentType: "application/octet-stream",
+	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(c.bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String("application/octet-stream"),
 	})
 	return err
 }
 
 // PutObjectWithLock uploads an object with Object Lock
 func (c *Client) PutObjectWithLock(ctx context.Context, key string, data []byte, mode string, retentionDays int) error {
-	// If mode is NONE, upload without object lock
-	if mode == "NONE" {
-		return c.PutObject(ctx, key, data)
-	}
-	
-	if !c.objectLock {
-		// Fall back to regular upload if object lock not supported
+	// If mode is NONE or object lock not supported, upload without lock
+	if mode == "NONE" || !c.objectLock {
 		return c.PutObject(ctx, key, data)
 	}
 
-	reader := bytes.NewReader(data)
 	retentionUntil := time.Now().AddDate(0, 0, retentionDays+1) // +1 day buffer
 
-	opts := minio.PutObjectOptions{
-		ContentType:     "application/octet-stream",
-		Mode:            minio.Governance,
-		RetainUntilDate: retentionUntil,
-	}
-
-	_, err := c.client.PutObject(ctx, c.bucket, key, reader, int64(len(data)), opts)
+	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:                  aws.String(c.bucket),
+		Key:                     aws.String(key),
+		Body:                    bytes.NewReader(data),
+		ContentType:             aws.String("application/octet-stream"),
+		ObjectLockMode:          "GOVERNANCE",
+		ObjectLockRetainUntilDate: &retentionUntil,
+	})
 	return err
 }
 
-// GetObject downloads an object from S3
+// GetObject downloads an object from S3 with proper timeout handling
 func (c *Client) GetObject(ctx context.Context, key string) ([]byte, error) {
-	obj, err := c.client.GetObject(ctx, c.bucket, key, minio.GetObjectOptions{})
-	if err != nil {
-		return nil, err
-	}
-	defer obj.Close()
+	// Create timeout context for this operation
+	opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
 
-	data, err := io.ReadAll(obj)
-	if err != nil {
-		return nil, err
+	// Use channel to handle timeout properly
+	type result struct {
+		data []byte
+		err  error
 	}
+	done := make(chan result, 1)
 
-	return data, nil
+	go func() {
+		buf := manager.NewWriteAtBuffer([]byte{})
+		_, err := c.downloader.Download(opCtx, buf, &s3.GetObjectInput{
+			Bucket: aws.String(c.bucket),
+			Key:    aws.String(key),
+		})
+		done <- result{buf.Bytes(), err}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			return nil, res.err
+		}
+		return res.data, nil
+	case <-opCtx.Done():
+		return nil, fmt.Errorf("download timeout after 90s: %w", opCtx.Err())
+	}
 }
 
 // GetObjectWithProgress downloads an object with progress callback
-func (c *Client) GetObjectWithProgress(ctx context.Context, key string, progressCb func(downloaded, total int64)) ([]byte, error) {
-	obj, err := c.client.GetObject(ctx, c.bucket, key, minio.GetObjectOptions{})
+func (c *Client) GetObjectWithProgress(ctx context.Context, key string, progressCb func(int64, int64)) ([]byte, error) {
+	opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	buf := manager.NewWriteAtBuffer([]byte{})
+
+	_, err := c.downloader.Download(opCtx, buf, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	defer obj.Close()
 
-	// Get object info for total size
-	info, err := obj.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	total := info.Size
-	var downloaded int64 = 0
-
-	data := make([]byte, 0, total)
-	buf := make([]byte, 32*1024) // 32KB buffer
-
-	for {
-		n, err := obj.Read(buf)
-		if n > 0 {
-			data = append(data, buf[:n]...)
-			downloaded += int64(n)
-			if progressCb != nil {
-				progressCb(downloaded, total)
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return data, nil
+	return buf.Bytes(), nil
 }
 
 // ListObjects lists objects with a given prefix
 func (c *Client) ListObjects(ctx context.Context, prefix string) ([]string, error) {
 	var objects []string
 
-	opts := minio.ListObjectsOptions{
-		Prefix:    prefix,
-		Recursive: true,
-	}
+	paginator := s3.NewListObjectsV2Paginator(c.client, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(c.bucket),
+		Prefix:  aws.String(prefix),
+	})
 
-	for obj := range c.client.ListObjects(ctx, c.bucket, opts) {
-		if obj.Err != nil {
-			return nil, obj.Err
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, err
 		}
-		objects = append(objects, obj.Key)
+		for _, obj := range page.Contents {
+			objects = append(objects, *obj.Key)
+		}
 	}
 
 	return objects, nil
@@ -165,14 +203,22 @@ func (c *Client) ListObjects(ctx context.Context, prefix string) ([]string, erro
 
 // DeleteObject deletes an object from S3
 func (c *Client) DeleteObject(ctx context.Context, key string) error {
-	return c.client.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{})
+	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	return err
 }
 
 // CheckObjectLockSupport checks if bucket supports Object Lock
 func (c *Client) CheckObjectLockSupport() (bool, error) {
-	_, _, _, _, err := c.client.GetObjectLockConfig(context.Background(), c.bucket)
+	_, err := c.client.GetObjectLockConfiguration(context.Background(), &s3.GetObjectLockConfigurationInput{
+		Bucket: aws.String(c.bucket),
+	})
 	if err != nil {
-		if minio.ToErrorResponse(err).Code == "ObjectLockConfigurationNotFoundError" {
+		// Check if it's the "not found" error (object lock not enabled)
+		errStr := err.Error()
+		if strings.Contains(errStr, "ObjectLockConfigurationNotFound") {
 			return false, nil
 		}
 		return false, err
@@ -182,8 +228,6 @@ func (c *Client) CheckObjectLockSupport() (bool, error) {
 
 // SetLifecyclePolicy sets lifecycle policy for retention cleanup
 func (c *Client) SetLifecyclePolicy(ctx context.Context, retentionDays int) error {
-	// For now, just log that this feature needs manual configuration
-	// Different S3 providers have different lifecycle APIs
 	fmt.Printf("Note: Lifecycle policy must be set manually in your S3 provider's console.\n")
 	fmt.Printf("Recommended policy: Delete objects in 'backups/' prefix older than %d days.\n", retentionDays+1)
 	return nil
@@ -196,5 +240,11 @@ func (c *Client) GetLifecyclePolicy(ctx context.Context) (string, error) {
 
 // BucketExists checks if bucket exists
 func (c *Client) BucketExists(ctx context.Context) (bool, error) {
-	return c.client.BucketExists(ctx, c.bucket)
+	_, err := c.client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(c.bucket),
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }

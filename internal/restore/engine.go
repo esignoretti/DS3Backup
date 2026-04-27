@@ -339,7 +339,8 @@ func (e *RestoreEngine) RestoreWithProgress(jobID string, opts *models.RestoreOp
 	downloader := NewDownloader(opts.Concurrency, e.s3client, e.crypto, e.extractor, ctx)
 	downloader.Start()
 
-	// Submit jobs
+	// Collect results in separate goroutine to prevent deadlock
+	done := make(chan struct{})
 	var mu sync.Mutex
 	result := &models.RestoreResult{
 		FilesRestored: 0,
@@ -349,6 +350,35 @@ func (e *RestoreEngine) RestoreWithProgress(jobID string, opts *models.RestoreOp
 		Errors:        []string{},
 	}
 
+	go func() {
+		for res := range downloader.Results() {
+			if res.Skipped {
+				mu.Lock()
+				result.FilesSkipped++
+				mu.Unlock()
+				tracker.Update(res.Entry.Path, res.Bytes, true)
+			} else if res.Success {
+				mu.Lock()
+				result.FilesRestored++
+				result.BytesRestored += res.Bytes
+				if len(res.Warnings) > 0 {
+					result.Warnings = append(result.Warnings, res.Warnings...)
+				}
+				mu.Unlock()
+				tracker.Update(res.Entry.Path, res.Bytes, false)
+			} else {
+				mu.Lock()
+				result.FilesFailed++
+				if res.Error != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+				}
+				mu.Unlock()
+			}
+		}
+		close(done)
+	}()
+
+	// Submit jobs
 	for _, entry := range filesToRestore {
 		destPath := e.getDestinationPath(entry, opts)
 		job := &Job{
@@ -361,32 +391,7 @@ func (e *RestoreEngine) RestoreWithProgress(jobID string, opts *models.RestoreOp
 	}
 
 	downloader.Stop()
-
-	// Collect results
-	for res := range downloader.Results() {
-		if res.Skipped {
-			mu.Lock()
-			result.FilesSkipped++
-			mu.Unlock()
-			tracker.Update(res.Entry.Path, res.Bytes, true)
-		} else if res.Success {
-			mu.Lock()
-			result.FilesRestored++
-			result.BytesRestored += res.Bytes
-			if len(res.Warnings) > 0 {
-				result.Warnings = append(result.Warnings, res.Warnings...)
-			}
-			mu.Unlock()
-			tracker.Update(res.Entry.Path, res.Bytes, false)
-		} else {
-			mu.Lock()
-			result.FilesFailed++
-			if res.Error != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
-			}
-			mu.Unlock()
-		}
-	}
+	<-done // Wait for result collection
 
 	return result, nil
 }
