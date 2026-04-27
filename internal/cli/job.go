@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/esignoretti/ds3backup/internal/recovery"
 	"github.com/esignoretti/ds3backup/internal/s3client"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
@@ -84,6 +86,19 @@ Example:
 		savedJob := cfg.GetJobByName(jobName)
 		if savedJob == nil {
 			return fmt.Errorf("failed to retrieve created job")
+		}
+
+		// Save job metadata to S3 if configured
+		if cfg.S3.Bucket != "" {
+			fmt.Printf("  Saving job metadata to S3... ")
+			s3Client, err := s3client.NewClient(cfg.S3)
+			if err != nil {
+				return fmt.Errorf("failed to create S3 client: %w", err)
+			}
+			if err := recovery.SaveJobMetadata(context.Background(), s3Client, *savedJob, cfg.MasterPassword); err != nil {
+				return fmt.Errorf("failed to save job metadata to S3: %w", err)
+			}
+			fmt.Printf("✓\n")
 		}
 
 		fmt.Printf("✓ Backup job created successfully!\n")

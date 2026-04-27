@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"syscall"
@@ -136,6 +138,22 @@ With --rebuild flag:
 
 		if err := saveConfig(cfg); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		// Save encryption salt to S3 for disaster recovery
+		if masterPassword != "" {
+			fmt.Printf("  Saving encryption salt to S3... ")
+			s3Client, err := s3client.NewClient(s3Cfg)
+			if err != nil {
+				return fmt.Errorf("failed to create S3 client: %w", err)
+			}
+			// Save salt as JSON (unencrypted, salt is not secret)
+			saltData := fmt.Sprintf(`{"salt": "%s"}`, base64.StdEncoding.EncodeToString(salt))
+			ctx := context.Background()
+			if err := s3Client.PutObject(ctx, ".ds3backup/encryption-salt.json", []byte(saltData)); err != nil {
+				return fmt.Errorf("failed to save salt to S3: %w", err)
+			}
+			fmt.Printf("✓\n")
 		}
 
 		fmt.Printf("\n✓ DS3 Backup initialized successfully!\n")

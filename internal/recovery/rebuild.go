@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,13 +33,37 @@ type JobMetadata struct {
 type RebuildEngine struct {
 	s3client       *s3client.Client
 	masterPassword string
+	salt           []byte
+}
+
+// LoadEncryptionSalt downloads the encryption salt from S3
+func LoadEncryptionSalt(ctx context.Context, s3client *s3client.Client) ([]byte, error) {
+	data, err := s3client.GetObject(ctx, ".ds3backup/encryption-salt.json")
+	if err != nil {
+		return nil, err
+	}
+	
+	var saltData struct {
+		Salt string `json:"salt"`
+	}
+	if err := json.Unmarshal(data, &saltData); err != nil {
+		return nil, fmt.Errorf("failed to parse salt file: %w", err)
+	}
+	
+	salt, err := base64.StdEncoding.DecodeString(saltData.Salt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode salt: %w", err)
+	}
+	
+	return salt, nil
 }
 
 // NewRebuildEngine creates a new rebuild engine
-func NewRebuildEngine(s3client *s3client.Client, masterPassword string) *RebuildEngine {
+func NewRebuildEngine(s3client *s3client.Client, masterPassword string, salt []byte) *RebuildEngine {
 	return &RebuildEngine{
 		s3client:       s3client,
 		masterPassword: masterPassword,
+		salt:           salt,
 	}
 }
 
@@ -90,7 +115,7 @@ func (e *RebuildEngine) DiscoverJobs(ctx context.Context) ([]JobMetadata, error)
 		// Try to download job metadata
 		metadata, err := e.downloadJobMetadata(ctx, jobID)
 		if err != nil {
-			fmt.Printf("  ℹ️  No metadata found for %s, will use defaults\n", jobID)
+			fmt.Printf("  ℹ️  No metadata found for %s: %v (using defaults)\n", jobID, err)
 			// Create minimal metadata
 			metadata = JobMetadata{
 				ID:             jobID,
@@ -111,8 +136,9 @@ func (e *RebuildEngine) downloadJobMetadata(ctx context.Context, jobID string) (
 	
 	data, err := e.s3client.GetObject(ctx, key)
 	if err != nil {
-		return JobMetadata{}, err
+			return JobMetadata{}, err
 	}
+	fmt.Printf("    Downloaded %d bytes\n", len(data))
 
 	// Decrypt if master password is set
 	var metadata JobMetadata
@@ -241,9 +267,18 @@ func SaveJobMetadata(ctx context.Context, s3client *s3client.Client, job models.
 
 // RunRebuild executes the rebuild process
 func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword string) error {
-	fmt.Println("Scanning S3 bucket for backup jobs...")
+	fmt.Println("Loading encryption salt from S3...")
 	
-	engine := NewRebuildEngine(s3client, masterPassword)
+	// Load encryption salt
+	salt, err := LoadEncryptionSalt(ctx, s3client)
+	if err != nil {
+		fmt.Printf("  ⚠️  Could not load salt: %v\n", err)
+		fmt.Println("  Decryption of job configs may fail")
+	} else {
+		fmt.Println("  ✓ Encryption salt loaded")
+	}
+	
+	engine := NewRebuildEngine(s3client, masterPassword, salt)
 	jobs, err := engine.DiscoverJobs(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to discover jobs: %w", err)
