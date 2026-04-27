@@ -12,12 +12,13 @@ import (
 
 // Config represents the main configuration
 type Config struct {
-	Version      int              `json:"version"`
-	S3           S3Config         `json:"s3"`
-	Encryption   EncryptionConfig `json:"encryption"`
-	ObjectLock   ObjectLockConfig `json:"objectLock"`
-	Jobs         []models.BackupJob `json:"jobs"`
-	ConfigPath   string           `json:"-"`
+	Version         int              `json:"version"`
+	S3              S3Config         `json:"s3"`
+	Encryption      EncryptionConfig `json:"encryption"`
+	ObjectLock      ObjectLockConfig `json:"objectLock"`
+	MasterPassword  string           `json:"masterPassword,omitempty"` // Encrypted checksum for verification
+	Jobs            []models.BackupJob `json:"jobs"`
+	ConfigPath      string           `json:"-"`
 }
 
 // S3Config holds S3 connection details

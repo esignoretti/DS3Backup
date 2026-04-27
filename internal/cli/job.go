@@ -221,6 +221,10 @@ If files are protected by Object Lock, deletion will fail with an error.`,
 			for _, key := range indexObjects {
 				_ = s3Client.DeleteObject(cmd.Context(), key, true)
 			}
+			
+			// Delete job metadata from S3
+			jobMetaKey := fmt.Sprintf(".ds3backup/jobs/%s/config.json.enc", jobID)
+			_ = s3Client.DeleteObject(cmd.Context(), jobMetaKey, true)
 		}
 
 		// Delete job from config
