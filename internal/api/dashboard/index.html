@@ -226,6 +226,12 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
         <input type="text" id="restoreJobId" readonly style="background:#0a192f;color:#8892b0" />
       </div>
       <div class="form-group">
+        <label>Backup Run</label>
+        <select id="restoreRunSelect" style="width:100%;padding:8px 10px;border:1px solid #1a5276;border-radius:6px;background:#0a192f;color:#e0e0e0;font-size:13px">
+          <option value="">Loading runs...</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label>Encryption Password</label>
         <input type="password" id="restorePassword" placeholder="Enter the job's encryption password" />
       </div>
@@ -386,6 +392,22 @@ function refreshNow(){loadDashboard()}
 function restoreJob(jobId){
   document.getElementById('restoreJobId').value=jobId;
   document.getElementById('restoreModal').classList.add('open');
+  document.getElementById('restoreRunSelect').innerHTML='<option value="">Loading runs...</option>';
+  fetch('/api/v1/jobs/'+jobId+'/history').then(function(r){return r.json()}).then(function(data){
+    var runs=data.runs||[];
+    if(runs.length===0){
+      document.getElementById('restoreRunSelect').innerHTML='<option value="">No backup runs yet</option>';
+    }else{
+      var html='<option value="">Latest backup</option>';
+      for(var i=0;i<runs.length;i++){
+        var r=runs[i];
+        html+='<option value="'+r.runTime+'">'+formatTime(r.runTime)+' — '+(r.filesAdded||0)+' files, '+formatBytes(r.bytesUploaded||0)+'</option>';
+      }
+      document.getElementById('restoreRunSelect').innerHTML=html;
+    }
+  }).catch(function(){
+    document.getElementById('restoreRunSelect').innerHTML='<option value="">All runs</option>';
+  });
 }
 
 function rescheduleJob(jobId,currentCron){
@@ -476,10 +498,12 @@ function startRestore(){
   var jobId=document.getElementById('restoreJobId').value;
   var password=document.getElementById('restorePassword').value;
   var path=document.getElementById('restorePath').value.trim();
+  var runTime=document.getElementById('restoreRunSelect').value;
   document.getElementById('restoreModal').classList.remove('open');
-  showToast('Restore started for '+jobId+(path?' to '+path:''),'info');
+  showToast('Restore started for '+jobId+(path?' to '+path:'')+(runTime?' from '+runTime:''),'info');
   var body={password:password};
   if(path)body.path=path;
+  if(runTime)body.time=runTime;
   fetch('/api/v1/restore/'+jobId,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     if(r.ok){showToast('Restore completed for '+jobId,'success')}else{showToast('Restore failed','error')}
   }).catch(function(e){showToast('Error: '+e.message,'error')});
