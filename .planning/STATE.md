@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (not yet created)
 
 **Core value:** Provide a secure, S3-only backup solution with client-side encryption, scheduling, and an intuitive interface
-**Current focus:** Phase 2 — Scheduling & Server
+**Current focus:** Phase 3 — Desktop UI
 
 ## Current Position
 
-Phase: 2 of 4 (Scheduling & Server)
-Plan: 4 of 4 in current phase (02-04-PLAN.md complete)
-Status: Executing, 4 of 4 plans done
-Last activity: 2026-04-29 — Executed 02-04-PLAN.md (Tests, Auto-Start & Dependency Cleanup)
+Phase: 3 of 4 (Desktop UI)
+Plan: 3 of 3 in current phase (03-03-PLAN.md complete)
+Status: Complete, 3 of 3 plans done
+Last activity: 2026-04-29 — Executed Phase 3 (Desktop UI): API layer, dashboard SPA, tray integration
 
 Progress: [████████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: ~7m 15s
-- Total execution time: ~29m 0s
+- Total plans completed: 7
+- Average duration: ~3m 45s
+- Total execution time: ~12m
 
 **By Phase:**
 
@@ -29,6 +29,7 @@ Progress: [████████░░] 80%
 |-------|-------|-------|----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | N/A |
 | 2. Scheduling & Server | 4/4 | ✅ Complete | ~7m 15s |
+| 3. Desktop UI | 3/3 | ✅ Complete | ~4m |
 
 ## Accumulated Context
 
@@ -47,6 +48,15 @@ Key design decisions for Phase 2:
 - D-10: daemon stop command tries API stop first, falls back to SIGTERM via PID
 - D-11: Desktop notifications use platform-specific APIs (osascript/notify-send)
 
+Key design decisions for Phase 3:
+- D-12: HistoryProvider is passed as non-pointer interface (nil means no provider)
+- D-13: Dashboard is embedded via go:embed in a separate `dashboard` package
+- D-14: Dashboard is a single HTML file with all CSS and JS inlined — no build step, no external deps
+- D-15: Dashboard auto-refreshes via setInterval at 5s, not WebSocket
+- D-16: Browser opening uses exec.Command with platform-specific commands (open/xdg-open/rundll32)
+- D-17: Per-job tray menu items created once on first status poll
+- D-18: Notifications are best-effort (log failures silently)
+
 ### Pending Todos
 
 None.
@@ -64,5 +74,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-04-29 (execution session)
-Stopped at: Completed 02-04-PLAN.md (Tests, Auto-Start & Dependency Cleanup)
-Resume file: Execute `/gsd-execute-phase 03` next
+Stopped at: Completed Phase 3 (Desktop UI) — 3 plans, all tasks executed
+Resume file: Execute `/gsd-execute-phase 04` next

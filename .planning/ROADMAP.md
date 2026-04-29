@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation & Restore** — Core backup/recovery CLI, encryption, S3 integration, restore pipeline, disaster recovery
 - [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon
-- [ ] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore
+- [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
 ## Phase Details
@@ -72,9 +72,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — API enhancements: history endpoint + dashboard static serving + embed infrastructure
-- [ ] 03-02-PLAN.md — Web dashboard SPA: single-file HTML+CSS+JS dashboard served at GET /
-- [ ] 03-03-PLAN.md — Tray wiring + notifications: open dashboard in browser, per-job backup items, notification integration
+- [x] 03-01-PLAN.md — API enhancements: history endpoint + dashboard static serving + embed infrastructure
+- [x] 03-02-PLAN.md — Web dashboard SPA: single-file HTML+CSS+JS dashboard served at GET /
+- [x] 03-03-PLAN.md — Tray wiring + notifications: open dashboard in browser, per-job backup items, notification integration
 
 ### Phase 4: Enterprise & Polish (Planned)
 **Goal**: Multi-target storage, advanced monitoring, performance optimization, and security hardening
@@ -95,5 +95,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
-| 3. Desktop UI | 3 plans | 📋 Planned | - |
+| 3. Desktop UI | 3 plans | ✅ Complete | 2026-04-29 |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
