@@ -15,6 +15,7 @@ import (
 //	POST   /api/v1/start         - Start the scheduler
 //	POST   /api/v1/stop          - Stop the scheduler
 //	GET    /api/v1/jobs          - List all backup jobs
+//	POST   /api/v1/jobs          - Create a new backup job
 //	GET    /api/v1/jobs/{id}     - Get details for a specific job
 //	POST   /api/v1/backup/run/{id} - Trigger a backup run for a job
 func (s *APIServer) setupRouter() http.Handler {
@@ -30,6 +31,7 @@ func (s *APIServer) setupRouter() http.Handler {
 
 	// Job endpoints
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
+	mux.HandleFunc("POST /api/v1/jobs", s.handleCreateJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/history", s.handleGetJobHistory)
 

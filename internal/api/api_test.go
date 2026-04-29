@@ -37,6 +37,10 @@ func (m *mockJobManager) GetJob(jobID string) *models.BackupJob {
 	return m.jobs[jobID]
 }
 
+func (m *mockJobManager) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+	return &models.BackupJob{ID: "new-job", Name: name}, nil
+}
+
 func (m *mockJobManager) GetAllJobs() []models.BackupJob {
 	result := make([]models.BackupJob, 0, len(m.jobs))
 	for _, j := range m.jobs {

@@ -379,6 +379,27 @@ func (a *daemonJobManagerAdapter) GetJob(jobID string) *models.BackupJob {
 	return a.cfg.GetJob(jobID)
 }
 
+func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+	job := models.BackupJob{
+		ID:                fmt.Sprintf("job_%d", time.Now().UnixNano()),
+		Name:              name,
+		SourcePath:        source,
+		Enabled:           true,
+		EncryptionPassword: password,
+		RetentionDays:     30,
+		ObjectLockMode:    "NONE",
+		CreatedAt:         time.Now(),
+		CronExpr:          cronExpr,
+		ScheduleEnabled:   cronExpr != "",
+	}
+	a.cfg.Jobs = append(a.cfg.Jobs, job)
+	if err := a.cfg.SaveConfig(); err != nil {
+		return nil, fmt.Errorf("failed to save config: %w", err)
+	}
+	log.Printf("Job created via API: %s (%s)", job.Name, job.ID)
+	return &job, nil
+}
+
 func (a *daemonJobManagerAdapter) GetAllJobs() []models.BackupJob {
 	return a.cfg.Jobs
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -63,6 +64,25 @@ func (s *APIServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		IsScheduled: job.ScheduleEnabled,
 		CronExpr:    job.CronExpr,
 	})
+}
+
+// handleCreateJob handles POST /api/v1/jobs.
+func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
+	var req CreateJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" || req.SourcePath == "" || req.Password == "" {
+		s.writeError(w, http.StatusBadRequest, "name, sourcePath, and password are required")
+		return
+	}
+	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, req.CronExpr)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusCreated, sanitizeJob(job))
 }
 
 // handleRunBackup handles POST /api/v1/backup/run/{id}.

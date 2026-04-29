@@ -22,6 +22,7 @@ type BackupRunner interface {
 type JobManager interface {
 	GetJob(jobID string) *models.BackupJob
 	GetAllJobs() []models.BackupJob
+	CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error)
 }
 
 // BackupJobWithStatus is a sanitized version of BackupJob with
@@ -97,6 +98,14 @@ type HistoryProvider interface {
 type HistoryResponse struct {
 	JobID string             `json:"jobId"`
 	Runs  []*models.BackupRun `json:"runs"`
+}
+
+// CreateJobRequest is the request payload for POST /api/v1/jobs.
+type CreateJobRequest struct {
+	Name       string `json:"name"`
+	SourcePath string `json:"sourcePath"`
+	Password   string `json:"password"`
+	CronExpr   string `json:"cronExpr,omitempty"`
 }
 
 // ErrorResponse is a generic error payload for the API.
