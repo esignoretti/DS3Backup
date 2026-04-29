@@ -304,8 +304,20 @@ func runBackupForDaemon(job *models.BackupJob) (*models.BackupRun, error) {
 	// Create backup engine
 	engine := backup.NewBackupEngine(cfg, s3Client, indexDB, cryptoEngine)
 
+	// Send starting notification
+	tray.NotifyBackupStarting(job.Name)
+
 	// Run backup (incremental, no progress callback)
 	run, err := engine.RunBackup(job, false, nil)
+
+	// Send completion or failure notification
+	if err != nil {
+		tray.NotifyBackupFailed(job.Name, err.Error())
+	} else if run != nil && run.Error != "" {
+		tray.NotifyBackupFailed(job.Name, run.Error)
+	} else if run != nil {
+		tray.NotifyBackupComplete(job.Name, run.FilesAdded+run.FilesChanged)
+	}
 
 	// Update job timestamp
 	now := time.Now()
