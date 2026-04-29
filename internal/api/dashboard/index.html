@@ -213,6 +213,37 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
   </div>
 </div>
 
+<!-- Restore Modal -->
+<div id="restoreModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Restore Backup</h3>
+      <button class="modal-close" onclick="document.getElementById('restoreModal').classList.remove('open')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Job ID</label>
+        <input type="text" id="restoreJobId" readonly style="background:#0a192f;color:#8892b0" />
+      </div>
+      <div class="form-group">
+        <label>Encryption Password</label>
+        <input type="password" id="restorePassword" placeholder="Enter the job's encryption password" />
+      </div>
+      <div class="form-group">
+        <label>Destination Directory (optional)</label>
+        <div class="input-row">
+          <input type="text" id="restorePath" placeholder="Leave empty for original location" />
+          <button class="btn btn-outline btn-sm" onclick="openRestoreDirBrowser()" type="button">Browse</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="document.getElementById('restoreModal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="startRestore()">Start Restore</button>
+    </div>
+  </div>
+</div>
+
 <!-- Browse Directory Modal -->
 <div id="browseModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal modal-wide">
@@ -353,9 +384,8 @@ async function toggleScheduler(){
 function refreshNow(){loadDashboard()}
 
 function restoreJob(jobId){
-  var path=prompt('Enter restore destination path (leave empty for original location):');
-  showToast('Restore triggered for '+jobId+(path?' to '+path:''),'info');
-  fetch('/api/v1/backup/run/'+jobId,{method:'POST'}).catch(function(){});
+  document.getElementById('restoreJobId').value=jobId;
+  document.getElementById('restoreModal').classList.add('open');
 }
 
 function rescheduleJob(jobId,currentCron){
@@ -434,6 +464,26 @@ function browseSelectDir(){
   var path=document.getElementById('browseCurrentPath').textContent;
   if(_browseCallback){_browseCallback.value=path}
   document.getElementById('browseModal').classList.remove('open');
+}
+
+function openRestoreDirBrowser(){
+  _browseCallback=document.getElementById('restorePath');
+  document.getElementById('browseModal').classList.add('open');
+  browseLoadDir(document.getElementById('restorePath').value||'/Users');
+}
+
+function startRestore(){
+  var jobId=document.getElementById('restoreJobId').value;
+  var password=document.getElementById('restorePassword').value;
+  var path=document.getElementById('restorePath').value.trim();
+  if(!password){showToast('Encryption password is required','error');return}
+  document.getElementById('restoreModal').classList.remove('open');
+  showToast('Restore started for '+jobId+(path?' to '+path:''),'info');
+  var body={password:password};
+  if(path)body.path=path;
+  fetch('/api/v1/restore/'+jobId,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if(r.ok){showToast('Restore completed for '+jobId,'success')}else{showToast('Restore failed','error')}
+  }).catch(function(e){showToast('Error: '+e.message,'error')});
 }
 
 function showToast(msg,type){
