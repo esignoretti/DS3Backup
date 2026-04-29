@@ -10,25 +10,25 @@ See: .planning/PROJECT.md (not yet created)
 ## Current Position
 
 Phase: 2 of 4 (Scheduling & Server)
-Plan: 1 of 4 in current phase (02-01-PLAN.md complete)
-Status: Plans created, ready to execute
-Last activity: 2026-04-29 — Executed 02-02-PLAN.md (REST API server)
+Plan: 3 of 4 in current phase (02-03-PLAN.md complete)
+Status: Executing, 3 of 4 plans done
+Last activity: 2026-04-29 — Executed 02-03-PLAN.md (Daemon mode + system tray)
 
-Progress: [█████░░░░░] 25%
+Progress: [███████░░░] 75%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: ~2m 16s
-- Total execution time: ~2m 16s
+- Total plans completed: 3
+- Average duration: ~6m 35s
+- Total execution time: ~19m 46s
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | N/A |
-| 2. Scheduling & Server | 1/4 | 🚧 In progress | ~2m 16s |
+| 2. Scheduling & Server | 3/4 | 🚧 In progress | ~6m 35s |
 
 ## Accumulated Context
 
@@ -44,6 +44,8 @@ Key design decisions for Phase 2:
 - D-07: Use Go 1.22+ ServeMux path parameters ({id} syntax) instead of manual path parsing
 - D-08: Sanitize job responses via BackupJobWithStatus to exclude EncryptionPassword from JSON output
 - D-09: Return HTTP 202 Accepted for async backup triggers (non-blocking)
+- D-10: daemon stop command tries API stop first, falls back to SIGTERM via PID
+- D-11: Desktop notifications use platform-specific APIs (osascript/notify-send)
 
 ### Pending Todos
 
@@ -62,5 +64,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-04-29 (execution session)
-Stopped at: Completed 02-02-PLAN.md (REST API server)
+Stopped at: Completed 02-03-PLAN.md (Daemon mode + system tray)
 Resume file: Execute `/gsd-execute-phase 02-scheduling-server` next

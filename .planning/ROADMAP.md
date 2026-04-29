@@ -89,6 +89,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
-| 2. Scheduling & Server | 1/4 executed | 🚧 In progress (02-02 done) | - |
+| 2. Scheduling & Server | 3/4 executed | 🚧 In progress (02-03 done) | - |
 | 3. Desktop UI | TBD | 📋 Planned | - |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
