@@ -13,7 +13,7 @@ From a CLI-only secure backup tool to a full-featured backup solution with sched
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation & Restore** — Core backup/recovery CLI, encryption, S3 integration, restore pipeline, disaster recovery
-- [ ] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon
+- [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon
 - [ ] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
@@ -59,7 +59,7 @@ Plans:
 - [x] 02-01-PLAN.md — Scheduler engine + cron-based backup execution (will-execute)
 - [x] 02-02-PLAN.md — REST API server for daemon control ✅ DONE
 - [x] 02-03-PLAN.md — Daemon mode + system tray integration (will-execute)
-- [x] 02-04-PLAN.md — Auto-start, health check, and graceful lifecycle (will-execute)
+- [x] 02-04-PLAN.md — Tests, auto-start, and dependency cleanup ✅ DONE
 
 ### Phase 3: Desktop UI (Planned)
 **Goal**: Cross-platform desktop application with progress notifications, backup history visualization, and one-click restore
@@ -89,6 +89,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
-| 2. Scheduling & Server | 3/4 executed | 🚧 In progress (02-03 done) | - |
+| 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
 | 3. Desktop UI | TBD | 📋 Planned | - |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
