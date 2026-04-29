@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -53,6 +54,13 @@ type CreateJobRequest struct {
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting
 // the EncryptionPassword field for safe API responses.
 func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
+	nextRun := job.NextRun
+	if nextRun.IsZero() && job.ScheduleEnabled && job.CronExpr != "" {
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if sched, err := parser.Parse(job.CronExpr); err == nil {
+			nextRun = sched.Next(time.Now())
+		}
+	}
 	return BackupJobWithStatus{
 		ID:              job.ID,
 		Name:            job.Name,
@@ -62,7 +70,7 @@ func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 		Enabled:         job.Enabled,
 		CreatedAt:       job.CreatedAt,
 		LastRun:         job.LastRun,
-		NextRun:         job.NextRun,
+		NextRun:         nextRun,
 		LastError:       job.LastError,
 		ScheduleEnabled: job.ScheduleEnabled,
 		CronExpr:        job.CronExpr,
