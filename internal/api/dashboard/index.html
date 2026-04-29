@@ -177,8 +177,10 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
       </div>
       <div class="form-group">
         <label>Source Directory</label>
-        <input type="text" id="newJobPath" placeholder="e.g. /Users/name/Documents" />
-        <div style="font-size:11px;color:#8892b0;margin-top:4px">Full absolute path required.</div>
+        <div class="input-row">
+          <input type="text" id="newJobPath" placeholder="e.g. /Users/name/Documents" />
+          <button class="btn btn-outline btn-sm" onclick="openDirBrowser(document.getElementById('newJobPath').value||'/Users')" type="button">Browse</button>
+        </div>
       </div>
       <div class="form-group">
         <label>Encryption Password</label>
@@ -207,6 +209,26 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="document.getElementById('logsModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Browse Directory Modal -->
+<div id="browseModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h3>Select Directory</h3>
+      <button class="modal-close" onclick="document.getElementById('browseModal').classList.remove('open')">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:400px">
+      <div id="browseCurrentPath" style="padding:8px 10px;background:#0a192f;border:1px solid #1a5276;border-radius:6px;margin-bottom:8px;font-size:13px;font-family:monospace"></div>
+      <div id="browseParentBtn" style="display:none;padding:6px 10px;cursor:pointer;border-radius:4px;margin-bottom:4px;font-size:13px;color:#8892b0" onclick="browseGoUp()" onmouseover="this.style.background='#0f3460'" onmouseout="this.style.background='transparent'">📁 .. (parent)</div>
+      <div id="browseSpinner" class="loading" style="padding:20px"><div class="spinner"></div><span>Loading...</span></div>
+      <div id="browseEntries" style="display:none;max-height:300px;overflow-y:auto"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="document.getElementById('browseModal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-success" onclick="browseSelectDir()">Select This Directory</button>
     </div>
   </div>
 </div>
@@ -345,6 +367,45 @@ async function createJob(){
     document.getElementById('newJobName').value='';document.getElementById('newJobPath').value='';document.getElementById('newJobPassword').value='';document.getElementById('newJobCron').value='';
     await loadDashboard();
   }catch(e){showToast('Failed: '+e.message,'error')}
+}
+
+var _browseCallback=null;
+function openDirBrowser(startPath){
+  _browseCallback=document.getElementById('newJobPath');
+  document.getElementById('browseModal').classList.add('open');
+  browseLoadDir(startPath);
+}
+function browseLoadDir(path){
+  document.getElementById('browseSpinner').style.display='flex';
+  document.getElementById('browseEntries').style.display='none';
+  document.getElementById('browseEntries').innerHTML='';
+  fetch('/api/v1/browse?path='+encodeURIComponent(path)).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
+    document.getElementById('browseSpinner').style.display='none';
+    document.getElementById('browseEntries').style.display='block';
+    document.getElementById('browseCurrentPath').textContent=data.path;
+    var entries=document.getElementById('browseEntries');
+    entries.innerHTML='';
+    if(data.parent){document.getElementById('browseParentBtn').style.display='block';document.getElementById('browseParentBtn').dataset.parent=data.parent}else{document.getElementById('browseParentBtn').style.display='none'}
+    for(var i=0;i<data.dirs.length;i++){
+      var d=document.createElement('div');
+      d.className='browse-entry';
+      d.style.cssText='padding:6px 10px;cursor:pointer;border-radius:4px;margin-bottom:2px;font-size:13px';
+      d.onmouseover=function(){this.style.background='#0f3460'};
+      d.onmouseout=function(){this.style.background='transparent'};
+      d.onclick=function(){browseLoadDir(data.path+'/'+data.dirs[i])};
+      d.textContent='📁 '+data.dirs[i];
+      entries.appendChild(d);
+    }
+  }).catch(function(e){document.getElementById('browseSpinner').style.display='none';showToast('Browse error: '+e.message,'error')});
+}
+function browseGoUp(){
+  var parent=document.getElementById('browseParentBtn').dataset.parent;
+  if(parent)browseLoadDir(parent);
+}
+function browseSelectDir(){
+  var path=document.getElementById('browseCurrentPath').textContent;
+  if(_browseCallback){_browseCallback.value=path}
+  document.getElementById('browseModal').classList.remove('open');
 }
 
 function showToast(msg,type){

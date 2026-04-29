@@ -29,6 +29,9 @@ func (s *APIServer) setupRouter() http.Handler {
 	// Logs endpoint
 	mux.HandleFunc("GET /api/v1/logs", s.handleGetLogs)
 
+	// Directory browser endpoint
+	mux.HandleFunc("GET /api/v1/browse", s.handleBrowse)
+
 	// Dashboard — serve index.html at root
 	dashFS := dashboard.GetDashboardFS()
 	if dashFS != nil {

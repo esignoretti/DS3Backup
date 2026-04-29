@@ -176,3 +176,44 @@ func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(strings.Join(lines, "\n")))
 }
+
+// handleBrowse handles GET /api/v1/browse?path=...
+func (s *APIServer) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		home, _ := os.UserHomeDir()
+		path = home
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("cannot read directory: %s", err.Error()))
+		return
+	}
+
+	var dirs []string
+	var files []string
+	for _, e := range entries {
+		name := e.Name()
+		if name[0] == '.' {
+			continue
+		}
+		if e.IsDir() {
+			dirs = append(dirs, name)
+		} else {
+			files = append(files, name)
+		}
+	}
+
+	parent := filepath.Dir(path)
+	if path == "/" {
+		parent = ""
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":   path,
+		"parent": parent,
+		"dirs":   dirs,
+		"files":  files,
+	})
+}
