@@ -224,7 +224,7 @@ body {
   <!-- Footer -->
   <div class="footer">
     <span id="lastRefresh">Last updated: —</span>
-    <span id="refreshIndicator">Auto-refresh every 5s</span>
+    <span id="refreshIndicator"></span>
   </div>
 </div>
 
@@ -699,6 +699,7 @@ function escapeHtml(str) {
 
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('refreshIndicator').textContent = 'Auto-refresh every ' + (REFRESH_INTERVAL / 1000) + 's';
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, REFRESH_INTERVAL);
 });
