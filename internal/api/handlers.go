@@ -72,17 +72,12 @@ func (s *APIServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 // handleRunBackup handles POST /api/v1/backup/run/{id}.
 func (s *APIServer) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
-
-	// Validate the job exists
 	job := s.jobManager.GetJob(jobID)
 	if job == nil {
 		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
 		return
 	}
-
-	// Trigger async backup run
 	s.runner.RunJob(jobID)
-
 	s.writeJSON(w, http.StatusAccepted, BackupTriggerResponse{
 		JobID:     jobID,
 		Triggered: true,
@@ -107,6 +102,42 @@ func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusCreated, sanitizeJob(job))
+}
+
+// handlePatchJob handles PATCH /api/v1/jobs/{id}.
+func (s *APIServer) handlePatchJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	job := s.jobManager.GetJob(jobID)
+	if job == nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+		return
+	}
+
+	var req struct {
+		CronExpr *string `json:"cronExpr"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.CronExpr != nil {
+		job.CronExpr = *req.CronExpr
+		job.ScheduleEnabled = *req.CronExpr != ""
+	}
+
+	// Save is handled by the adapter
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleDeleteJob handles DELETE /api/v1/jobs/{id}.
+func (s *APIServer) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+	if s.jobManager.RemoveJob(jobID) {
+		s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	} else {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+	}
 }
 
 // handleGetJobHistory handles GET /api/v1/jobs/{id}/history.

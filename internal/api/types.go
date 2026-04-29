@@ -24,6 +24,7 @@ type JobManager interface {
 	GetJob(jobID string) *models.BackupJob
 	GetAllJobs() []models.BackupJob
 	CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error)
+	RemoveJob(jobID string) bool
 }
 
 // BackupJobWithStatus is a sanitized version of BackupJob with

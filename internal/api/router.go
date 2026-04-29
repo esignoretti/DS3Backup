@@ -21,6 +21,8 @@ func (s *APIServer) setupRouter() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("POST /api/v1/jobs", s.handleCreateJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
+	mux.HandleFunc("PATCH /api/v1/jobs/{id}", s.handlePatchJob)
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.handleDeleteJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/history", s.handleGetJobHistory)
 
 	// Backup endpoints

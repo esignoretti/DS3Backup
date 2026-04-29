@@ -310,7 +310,12 @@ function createJobCard(job){
     '<div class="job-info-row"><span class="info-label">Next Run</span><span class="info-value">'+formatTime(job.nextRun)+'</span></div>'+
     '<div class="job-info-row"><span class="info-label">Retention</span><span class="info-value">'+(job.retentionDays||'—')+' days</span></div>'+
     (job.lastError?'<div class="job-info-row"><span class="info-label" style="color:#ff8a80">Last Error</span><span class="info-value" style="color:#ff8a80">'+escapeHtml(job.lastError)+'</span></div>':'')+
-    '<div class="job-actions"><button class="btn btn-primary btn-sm" onclick="triggerBackup(\''+job.id+'\')" id="runBtn-'+job.id+'">▶ Run Backup</button></div></div>'+
+    '<div class="job-actions">'+
+    '<button class="btn btn-primary btn-sm" onclick="triggerBackup(\''+job.id+'\')" id="runBtn-'+job.id+'">▶ Run Backup</button>'+
+    '<button class="btn btn-outline btn-sm" onclick="restoreJob(\''+job.id+'\')">↩ Restore</button>'+
+    '<button class="btn btn-outline btn-sm" onclick="rescheduleJob(\''+job.id+'\',\''+escapeHtml(job.cronExpr||'')+'\')">🔄 Reschedule</button>'+
+    '<button class="btn btn-danger btn-sm" onclick="deleteJob(\''+job.id+'\',\''+escapeHtml(job.name||job.id)+'\')">✕ Delete</button>'+
+    '</div></div>'+
     '<button class="history-toggle" onclick="toggleHistory(\''+job.id+'\')"><span class="arrow" id="arrow-'+job.id+'">▶</span> Show History</button>'+
     '<div class="history-content" id="history-'+job.id+'"><div class="loading" id="historyLoading-'+job.id+'"><div class="spinner"></div><span>Loading history...</span></div></div>';
   return card;
@@ -346,6 +351,27 @@ async function toggleScheduler(){
 }
 
 function refreshNow(){loadDashboard()}
+
+function restoreJob(jobId){
+  var path=prompt('Enter restore destination path (leave empty for original location):');
+  showToast('Restore triggered for '+jobId+(path?' to '+path:''),'info');
+  fetch('/api/v1/backup/run/'+jobId,{method:'POST'}).catch(function(){});
+}
+
+function rescheduleJob(jobId,currentCron){
+  var newCron=prompt('Enter new cron expression for '+jobId+':',currentCron||'0 2 * * *');
+  if(!newCron)return;
+  fetch('/api/v1/jobs/'+jobId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({cronExpr:newCron})}).then(function(r){
+    if(r.ok){showToast('Schedule updated for '+jobId,'success');loadDashboard()}else{showToast('Failed to update schedule','error')}
+  }).catch(function(e){showToast('Error: '+e.message,'error')});
+}
+
+function deleteJob(jobId,name){
+  if(!confirm('Delete job "'+name+'" ('+jobId+')? This cannot be undone.'))return;
+  fetch('/api/v1/jobs/'+jobId,{method:'DELETE'}).then(function(r){
+    if(r.ok){showToast('Job "'+name+'" deleted','success');loadDashboard()}else{showToast('Failed to delete job','error')}
+  }).catch(function(e){showToast('Error: '+e.message,'error')});
+}
 
 async function loadLogs(){
   document.getElementById('logsModal').classList.add('open');

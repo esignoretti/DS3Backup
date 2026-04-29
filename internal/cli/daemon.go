@@ -398,6 +398,21 @@ func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr str
 	return &job, nil
 }
 
+func (a *daemonJobManagerAdapter) RemoveJob(jobID string) bool {
+	for i, job := range a.cfg.Jobs {
+		if job.ID == jobID {
+			a.cfg.Jobs = append(a.cfg.Jobs[:i], a.cfg.Jobs[i+1:]...)
+			if err := a.cfg.SaveConfig(); err != nil {
+				log.Printf("Warning: failed to save config after removing job %s: %v", jobID, err)
+				return false
+			}
+			log.Printf("Job removed via API: %s (%s)", job.Name, jobID)
+			return true
+		}
+	}
+	return false
+}
+
 // daemonHistoryProvider wraps config to implement api.HistoryProvider.
 type daemonHistoryProvider struct {
 	cfg *config.Config

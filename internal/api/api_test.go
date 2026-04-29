@@ -55,6 +55,14 @@ func (m *mockJobManager) CreateJob(name, source, password, cronExpr string) (*mo
 	return job, nil
 }
 
+func (m *mockJobManager) RemoveJob(jobID string) bool {
+	if _, ok := m.jobs[jobID]; ok {
+		delete(m.jobs, jobID)
+		return true
+	}
+	return false
+}
+
 // newTestServer creates an APIServer with mock dependencies for testing.
 func newTestServer(runner *mockRunner, jobManager *mockJobManager) *APIServer {
 	runner.runCalled = make(chan string, 1)
