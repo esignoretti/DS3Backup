@@ -274,6 +274,69 @@ function formatStatus(status) {
   }
 }
 
+function formatCron(expr) {
+  if (!expr) return '—';
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return escapeHtml(expr);
+  const [min, hour, dom, mon, dow] = parts;
+  let desc = '';
+  if (min === '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
+    desc = 'Every minute';
+  } else if (min === '0' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
+    desc = 'Every hour';
+  } else if (min === '0' && hour === '*') {
+    desc = `Every hour at :00`;
+  } else if (min === '0' && dom === '*' && mon === '*' && dow === '*') {
+    desc = descHour(hour);
+  } else if (min === '0' && hour === '9' && dom === '*' && mon === '*' && dow === '1-5') {
+    desc = 'Weekdays at 9:00 AM';
+  } else if (min === '0' && hour === '9' && dom === '*' && mon === '*' && (dow === '1,2,3,4,5' || dow === '1-5' || dow === 'MON-FRI')) {
+    desc = 'Weekdays at 9:00 AM';
+  } else if (min === '0' && hour === '0' && dom === '*' && mon === '*' && dow === '*') {
+    desc = 'Midnight (daily)';
+  } else if (min === '0' && hour === '12' && dom === '*' && mon === '*' && dow === '*') {
+    desc = 'Noon (daily)';
+  } else if (min === '0' && hour === '0' && dom === '1' && mon === '*' && dow === '*') {
+    desc = 'First day of every month';
+  } else if (min !== '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
+    desc = `Every hour at minute ${min}`;
+  } else if (min.startsWith('*/')) {
+    const interval = min.substring(2);
+    desc = `Every ${interval} minute(s)`;
+    if (hour !== '*') desc += `, hour ${hour}`;
+  } else if (hour.startsWith('*/')) {
+    const interval = hour.substring(2);
+    desc = `Every ${interval} hour(s)` + (min !== '0' ? ` at :${min}` : '');
+  } else if (hour.includes(',')) {
+    const hours = hour.split(',').map(h => {
+      const hnum = parseInt(h);
+      if (hnum === 0) return 'midnight';
+      if (hnum === 12) return 'noon';
+      return hnum > 12 ? `${hnum-12} PM` : `${hnum} AM`;
+    }).join(', ');
+    desc = `At ${hours}` + (min !== '0' ? ` minute ${min}` : '');
+  } else {
+    desc = descHour(hour) + (min !== '0' ? ` at minute ${min}` : '');
+  }
+  if (mon !== '*') desc += `, month: ${mon}`;
+  if (dow !== '*' && !(dow === '1-5' || dow === 'MON-FRI' || dow === '1,2,3,4,5')) {
+    desc += `, day: ${dow}`;
+  } else if (dow === '0' || dow === '7' || dow === 'SUN') {
+    desc += ' (Sundays)';
+  } else if (dow === '6' || dow === 'SAT') {
+    desc += ' (Saturdays)';
+  }
+  return `<span title="${escapeHtml(expr)}">${escapeHtml(desc)}</span>`;
+}
+
+function descHour(hour) {
+  if (hour === '*') return 'Every hour';
+  const h = parseInt(hour);
+  if (h === 0) return 'Midnight';
+  if (h === 12) return 'Noon';
+  return h > 12 ? `Daily at ${h-12}:00 PM` : `Daily at ${h}:00 AM`;
+}
+
 // ===== Toast =====
 function showToast(message, type) {
   const container = document.getElementById('toastContainer');
@@ -383,7 +446,7 @@ async function createJobCard(job) {
       </div>
       <div class="job-info-row">
         <span class="info-label">Schedule</span>
-        <span class="info-value">${job.scheduleEnabled ? escapeHtml(job.cronExpr || 'enabled') : 'Manual only'}</span>
+        <span class="info-value">${job.scheduleEnabled ? formatCron(job.cronExpr) : 'Manual only'}</span>
       </div>
       <div class="job-info-row">
         <span class="info-label">Next Run</span>
