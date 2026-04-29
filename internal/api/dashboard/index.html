@@ -235,7 +235,8 @@ async function loadDashboard(){
     const dot=document.getElementById('connDot'),txt=document.getElementById('connText'),bn=document.getElementById('errorBanner');
     dot.className='status-dot connected';txt.textContent='Connected';bn.classList.remove('visible');
     try{
-      const j=await apiGet('/api/v1/jobs');
+      const jobsResp=await apiGet('/api/v1/jobs');
+      const j=jobsResp.jobs||[];
       jobsData=j;
       if(!j||j.length===0){
         document.getElementById('jobsSection').style.display='';
