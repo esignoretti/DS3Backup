@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"github.com/esignoretti/ds3backup/internal/recovery"
 	"github.com/esignoretti/ds3backup/internal/s3client"
@@ -15,12 +16,15 @@ import (
 )
 
 var (
-	jobName      string
-	jobPath      string
-	jobRetention int
-	jobLockMode  string
-	jobPassword  string
-	jobClean     bool
+	jobName       string
+	jobPath       string
+	jobRetention  int
+	jobLockMode   string
+	jobPassword   string
+	jobClean      bool
+	jobCron       string
+	jobDisable    bool
+	jobScheduleID string
 )
 
 // jobCmd represents the job command
@@ -142,6 +146,9 @@ var jobListCmd = &cobra.Command{
 			} else {
 				fmt.Printf("   Last Run: Never\n")
 			}
+			if job.ScheduleEnabled && job.CronExpr != "" {
+				fmt.Printf("   Schedule: %s\n", job.CronExpr)
+			}
 			fmt.Println()
 		}
 
@@ -261,11 +268,75 @@ If files are protected by Object Lock, deletion will fail with an error.`,
 	},
 }
 
+// jobScheduleCmd represents the schedule management subcommand
+var jobScheduleCmd = &cobra.Command{
+	Use:   "schedule [job-id]",
+	Short: "Enable or disable scheduled backups for a job",
+	Long: `Set a cron schedule for automatic backups or disable scheduling.
+
+A cron expression uses the standard 5-field format:
+  minute hour day-of-month month day-of-week
+
+Examples:
+  ds3backup job schedule job_XXX --cron "0 2 * * *"    # Daily at 2am
+  ds3backup job schedule job_XXX --cron "0 */6 * * *"  # Every 6 hours
+  ds3backup job schedule job_XXX --disable              # Disable scheduling`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jobID := jobScheduleID
+		if jobID == "" {
+			if len(args) < 1 {
+				return fmt.Errorf("job ID is required (use positional arg or --id flag)")
+			}
+			jobID = args[0]
+		}
+
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+
+		job := cfg.GetJob(jobID)
+		if job == nil {
+			return fmt.Errorf("job not found: %s", jobID)
+		}
+
+		if jobDisable {
+			job.ScheduleEnabled = false
+			job.CronExpr = ""
+			if err := saveConfig(cfg); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+			fmt.Printf("✓ Schedule disabled for job %s\n", jobID)
+			return nil
+		}
+
+		if jobCron == "" {
+			return fmt.Errorf("--cron flag is required to enable scheduling")
+		}
+
+		// Validate cron expression
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if _, err := parser.Parse(jobCron); err != nil {
+			return fmt.Errorf("invalid cron expression %q: %w", jobCron, err)
+		}
+
+		job.ScheduleEnabled = true
+		job.CronExpr = jobCron
+		if err := saveConfig(cfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		fmt.Printf("✓ Schedule enabled for job %s: %s\n", jobID, jobCron)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(jobCmd)
 	jobCmd.AddCommand(jobAddCmd)
 	jobCmd.AddCommand(jobListCmd)
 	jobCmd.AddCommand(jobDeleteCmd)
+	jobCmd.AddCommand(jobScheduleCmd)
 
 	jobAddCmd.Flags().StringVarP(&jobName, "name", "n", "", "Job name")
 	jobAddCmd.Flags().StringVarP(&jobPath, "path", "p", "", "Directory path to backup")
@@ -278,6 +349,10 @@ func init() {
 	jobAddCmd.MarkFlagRequired("password")
 
 	jobDeleteCmd.Flags().BoolVar(&jobClean, "clean", false, "Also delete all S3 backup files for this job")
+
+	jobScheduleCmd.Flags().StringVar(&jobCron, "cron", "", "Cron expression (e.g. \"0 2 * * *\")")
+	jobScheduleCmd.Flags().BoolVar(&jobDisable, "disable", false, "Disable scheduling")
+	jobScheduleCmd.Flags().StringVar(&jobScheduleID, "id", "", "Job ID")
 }
 
 // expandPath expands ~ to home directory
