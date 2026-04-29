@@ -1,0 +1,44 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+        "cubbit": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "Cubbit",
+            "options": {
+                "baseURL": "https://mimir.cubbit.dev/v1",
+                "apiKey": "{file:mimir-key}"
+            },
+            "models": {
+                "vllm/mimir": {
+                    "name": "Mimir",
+                    "limit": {
+                        "context": 188416,
+                        "output": 16384
+                    }
+                },
+                "cubbit/mimir-small": {
+                    "name": "Mimir Small",
+                    "attachment": true,
+                    "modalities": {
+                        "input": [
+                            "text",
+                            "image"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "limit": {
+                        "context": 145408,
+                        "output": 8192
+                    }
+                }
+            }
+        }
+    },
+    "model": "cubbit/vllm/mimir",
+    "share": "disabled",
+    "disabled_providers": [
+        "opencode"
+    ]
+}

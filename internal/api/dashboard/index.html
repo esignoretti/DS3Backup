@@ -430,7 +430,7 @@ async function getJobLastRunStatus(jobId) {
 
 async function toggleHistory(jobId) {
   const content = document.getElementById('history-' + jobId);
-  const arrow = document.getElementById('arrow-' + jobIdipse);
+  const arrow = document.getElementById('arrow-' + jobId);
   const isOpen = content.classList.contains('open');
 
   if (isOpen) {
