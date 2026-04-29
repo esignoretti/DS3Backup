@@ -476,7 +476,6 @@ function startRestore(){
   var jobId=document.getElementById('restoreJobId').value;
   var password=document.getElementById('restorePassword').value;
   var path=document.getElementById('restorePath').value.trim();
-  if(!password){showToast('Encryption password is required','error');return}
   document.getElementById('restoreModal').classList.remove('open');
   showToast('Restore started for '+jobId+(path?' to '+path:''),'info');
   var body={password:password};
