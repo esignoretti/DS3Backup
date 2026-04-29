@@ -13,9 +13,16 @@ import (
 )
 
 const (
-	maxRetries = 3
-	retryDelay = 2 * time.Second
+	maxRetries = 5
 )
+
+var retryDelays = []time.Duration{
+	3 * time.Second,
+	6 * time.Second,
+	9 * time.Second,
+	27 * time.Second,
+	54 * time.Second,
+}
 
 // IndexDB wraps BadgerDB for file indexing
 type IndexDB struct {
@@ -24,19 +31,18 @@ type IndexDB struct {
 
 // OpenIndexDB opens or creates a BadgerDB index
 func OpenIndexDB(path string) (*IndexDB, error) {
-	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		db, err := openBadger(path)
 		if err == nil {
 			return &IndexDB{db: db}, nil
 		}
-		lastErr = err
 		if i < maxRetries-1 {
-			log.Printf("BadgerDB locked at %s, retrying in %s (attempt %d/%d)", path, retryDelay, i+1, maxRetries-1)
-			time.Sleep(retryDelay)
+			delay := retryDelays[i]
+			log.Printf("BadgerDB locked at %s, retrying in %ds (attempt %d/%d)", path, int(delay.Seconds()), i+1, maxRetries-1)
+			time.Sleep(delay)
 		}
 	}
-	return nil, fmt.Errorf("failed to open BadgerDB after %d attempts: %w", maxRetries, lastErr)
+	return nil, fmt.Errorf("resource temporarily unavailable, try again later")
 }
 
 func openBadger(path string) (*badger.DB, error) {
