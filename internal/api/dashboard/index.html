@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DS3 Backup Dashboard</title>
+<link rel="icon" href="data:,">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;background:#1a1a2e;color:#e0e0e0;line-height:1.5;min-height:100vh;padding:20px}
@@ -176,11 +177,10 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
       </div>
       <div class="form-group">
         <label>Source Directory</label>
-        <div class="input-row">
-          <input type="text" id="newJobPath" placeholder="/Users/name/Documents" />
-          <button class="btn btn-outline btn-sm" onclick="document.getElementById('dirPicker').click()">Browse</button>
-        </div>
-        <input type="file" id="dirPicker" webkitdirectory style="display:none" onchange="document.getElementById('newJobPath').value=this.files[0]?.webkitRelativePath?.split('/')[0]||''" />
+        <input type="text" id="newJobPath" placeholder="e.g. /Users/name/Documents" />
+        <div style="font-size:11px;color:#8892b0;margin-top:4px">Full absolute path required. Browsers can't read filesystem paths — type it manually.</div>
+      </div>
+        <input type="file" id="dirPicker" webkitdirectory style="display:none" onchange="var files=this.files;if(files&&files.length>0){var firstPath=files[0].webkitRelativePath;var slashIdx=firstPath.indexOf('/');document.getElementById('newJobPath').value=firstPath.substring(0,slashIdx)}" />
       </div>
       <div class="form-group">
         <label>Encryption Password</label>
@@ -236,19 +236,23 @@ async function loadDashboard(){
     dot.className='status-dot connected';txt.textContent='Connected';bn.classList.remove('visible');
     try{
       const jobsResp=await apiGet('/api/v1/jobs');
+      showToast('API returned jobs: '+JSON.stringify(jobsResp).substring(0,100),'info');
       const j=jobsResp.jobs||[];
       jobsData=j;
       if(!j||j.length===0){
         document.getElementById('jobsSection').style.display='';
-        document.getElementById('jobsContainer').innerHTML='<div class="empty-state"><h3>No backup jobs</h3><p>Click "+ Add Job" to create your first backup job.</p></div>';
+        document.getElementById('jobsContainer').innerHTML='<div class="empty-state"><h3>0 backup jobs from API</h3><p>The daemon reports no jobs configured. Use the CLI to add one.</p></div>';
+        document.getElementById('jobCount').textContent='0 jobs';
       }else{
         document.getElementById('jobsSection').style.display='';
         document.getElementById('jobCount').textContent=j.length+' job(s)';
         var c=document.getElementById('jobsContainer');c.innerHTML='';
         for(var i=0;i<j.length;i++)c.appendChild(createJobCard(j[i]));
       }
-    }catch(e){document.getElementById('jobsSection').style.display='none'}
-    document.getElementById('loadingIndicator').style.display='none';
+    }catch(e){
+      showToast('Jobs fetch error: '+e.message,'error');
+      document.getElementById('jobsSection').style.display='none'
+    }    document.getElementById('loadingIndicator').style.display='none';
     document.getElementById('lastRefresh').textContent='Last updated: '+new Date().toLocaleTimeString();
   }catch(err){
     const dot=document.getElementById('connDot'),txt=document.getElementById('connText'),bn=document.getElementById('errorBanner');
