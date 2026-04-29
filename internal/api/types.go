@@ -22,6 +22,7 @@ type BackupRunner interface {
 type JobManager interface {
 	GetJob(jobID string) *models.BackupJob
 	GetAllJobs() []models.BackupJob
+	CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error)
 }
 
 // BackupJobWithStatus is a sanitized version of BackupJob with
@@ -35,10 +36,18 @@ type BackupJobWithStatus struct {
 	Enabled         bool       `json:"enabled"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	LastRun         *time.Time `json:"lastRun,omitempty"`
-	NextRun         time.Time  `json:"nextRun"`
+	NextRun         time.Time  `json:"nextRun,omitempty"`
 	LastError       string     `json:"lastError,omitempty"`
 	ScheduleEnabled bool       `json:"scheduleEnabled"`
 	CronExpr        string     `json:"cronExpr,omitempty"`
+}
+
+// CreateJobRequest is the JSON body for creating a new job.
+type CreateJobRequest struct {
+	Name       string `json:"name"`
+	SourcePath string `json:"sourcePath"`
+	Password   string `json:"password"`
+	CronExpr   string `json:"cronExpr,omitempty"`
 }
 
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting
@@ -92,4 +101,15 @@ type BackupTriggerResponse struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 	Code  int    `json:"code"`
+}
+
+// HistoryResponse is the response for GET /api/v1/jobs/{id}/history.
+type HistoryResponse struct {
+	JobID string              `json:"jobId"`
+	Runs  []*models.BackupRun `json:"runs"`
+}
+
+// HistoryProvider is the interface for retrieving backup run history.
+type HistoryProvider interface {
+	GetJobHistory(jobID string, limit int) ([]*models.BackupRun, error)
 }

@@ -12,20 +12,24 @@ import (
 
 // APIServer is the HTTP REST API server for daemon control.
 type APIServer struct {
-	port       int
-	runner     BackupRunner
-	jobManager JobManager
-	server     *http.Server
-	mu         sync.RWMutex
-	startTime  time.Time
+	port            int
+	runner          BackupRunner
+	jobManager      JobManager
+	historyProvider HistoryProvider
+	logPath         string
+	server          *http.Server
+	mu              sync.RWMutex
+	startTime       time.Time
 }
 
 // NewAPIServer creates a new APIServer with the given port and dependencies.
-func NewAPIServer(port int, runner BackupRunner, jobManager JobManager) *APIServer {
+func NewAPIServer(port int, runner BackupRunner, jobManager JobManager, historyProvider HistoryProvider, logPath string) *APIServer {
 	return &APIServer{
-		port:       port,
-		runner:     runner,
-		jobManager: jobManager,
+		port:            port,
+		runner:          runner,
+		jobManager:      jobManager,
+		historyProvider: historyProvider,
+		logPath:         logPath,
 	}
 }
 

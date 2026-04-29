@@ -178,7 +178,12 @@ Examples:
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-		log.Println("Starting daemon...")
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config directory: %w", err)
+	}
+
+	log.Println("Starting daemon...")
 
 		// Determine port from flag or config
 		if daemonPort == 0 {
@@ -210,11 +215,13 @@ Examples:
 		// 5. Create API adapters
 		runnerAdapter := &daemonRunnerAdapter{scheduler: sched}
 		jobAdapter := &daemonJobManagerAdapter{cfg: cfg}
+		historyAdapter := &daemonHistoryProvider{cfg: cfg}
 
 		// 6. Start API server
 		var apiServer *api.APIServer
 		if !daemonNoAPI {
-			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter)
+			logPath := filepath.Join(configDir, "ds3backup.log")
+			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyAdapter, logPath)
 			if err := apiServer.Start(); err != nil {
 				removePIDFile()
 				return fmt.Errorf("failed to start API server: %w", err)
@@ -368,6 +375,49 @@ func (a *daemonJobManagerAdapter) GetJob(jobID string) *models.BackupJob {
 
 func (a *daemonJobManagerAdapter) GetAllJobs() []models.BackupJob {
 	return a.cfg.Jobs
+}
+
+func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+	job := models.BackupJob{
+		ID:                 fmt.Sprintf("job_%d", time.Now().UnixNano()),
+		Name:               name,
+		SourcePath:         source,
+		Enabled:            true,
+		EncryptionPassword: password,
+		RetentionDays:      30,
+		ObjectLockMode:     "NONE",
+		CreatedAt:          time.Now(),
+		CronExpr:           cronExpr,
+		ScheduleEnabled:    cronExpr != "",
+	}
+	a.cfg.Jobs = append(a.cfg.Jobs, job)
+	if err := a.cfg.SaveConfig(); err != nil {
+		return nil, fmt.Errorf("failed to save config: %w", err)
+	}
+	log.Printf("Job created via API: %s (%s)", job.Name, job.ID)
+	return &job, nil
+}
+
+// daemonHistoryProvider wraps config to implement api.HistoryProvider.
+type daemonHistoryProvider struct {
+	cfg *config.Config
+}
+
+func (h *daemonHistoryProvider) GetJobHistory(jobID string, limit int) ([]*models.BackupRun, error) {
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	indexDir := filepath.Join(configDir, "index", jobID)
+	if _, err := os.Stat(indexDir); os.IsNotExist(err) {
+		return []*models.BackupRun{}, nil
+	}
+	idx, err := index.OpenIndexDB(indexDir)
+	if err != nil {
+		return nil, err
+	}
+	defer idx.Close()
+	return idx.GetBackupHistory(jobID, limit)
 }
 
 // daemonStatusCmd represents the `ds3backup daemon status` command.

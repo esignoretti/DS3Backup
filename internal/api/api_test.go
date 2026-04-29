@@ -45,10 +45,20 @@ func (m *mockJobManager) GetAllJobs() []models.BackupJob {
 	return result
 }
 
+func (m *mockJobManager) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+	job := &models.BackupJob{
+		ID:         "new-job",
+		Name:       name,
+		SourcePath: source,
+	}
+	m.jobs["new-job"] = job
+	return job, nil
+}
+
 // newTestServer creates an APIServer with mock dependencies for testing.
 func newTestServer(runner *mockRunner, jobManager *mockJobManager) *APIServer {
 	runner.runCalled = make(chan string, 1)
-	return NewAPIServer(8099, runner, jobManager)
+	return NewAPIServer(8099, runner, jobManager, nil, "")
 }
 
 // executeRequest performs an HTTP request against the server's router.
@@ -514,7 +524,7 @@ func TestAPIResponseFormat_Error(t *testing.T) {
 func TestAPIServer_StartStopLifecycle(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := NewAPIServer(0, runner, jm)
+	s := NewAPIServer(0, runner, jm, nil, "")
 
 	if s.IsRunning() {
 		t.Error("expected server not to be running before Start")
