@@ -2,17 +2,554 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DS3 Backup Dashboard</title>
+<style>
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  line-height: 1.5;
+  min-height: 100vh;
+  padding: 20px;
+}
+/* ===== Layout ===== */
+.container { max-width: 1200px; margin: 0 auto; }
+/* ===== Header ===== */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; background: #16213e; border-radius: 12px; margin-bottom: 20px;
+  flex-wrap: wrap; gap: 12px;
+}
+.header-title { display: flex; align-items: center; gap: 12px; }
+.header-title h1 { font-size: 22px; font-weight: 700; color: #fff; }
+.header-title .subtitle { font-size: 12px; color: #8892b0; }
+.connection-status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.status-dot.connected { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+.status-dot.disconnected { background: #f44336; box-shadow: 0 0 6px #f44336; }
+/* ===== Error Banner ===== */
+.error-banner {
+  display: none; padding: 12px 20px; background: #3a1a1a; border: 1px solid #f44336;
+  border-radius: 8px; margin-bottom: 16px; color: #ff8a80; font-size: 14px;
+}
+.error-banner.visible { display: block; }
+/* ===== Status Bar ===== */
+.status-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.status-card {
+  background: #16213e; border-radius: 10px; padding: 16px 20px; border: 1px solid #0f3460;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.status-card .label { font-size: 12px; color: #8892b0; text-transform: uppercase; letter-spacing: 0.5px; }
+.status-card .value { font-size: 18px; font-weight: 600; color: #fff; }
+.status-card .value.running { color: #4caf50; }
+.status-card .value.stopped { color: #f44336; }
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+  border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;
+  border: 1px solid transparent; transition: all 0.2s;
+}
+.btn-primary { background: #0f3460; color: #e0e0e0; border-color: #1a5276; }
+.btn-primary:hover { background: #1a5276; }
+.btn-danger { background: #4a1a1a; color: #ff8a80; border-color: #6a2a2a; }
+.btn-danger:hover { background: #6a2a2a; }
+.btn-success { background: #1a3a1a; color: #81c784; border-color: #2a5a2a; }
+.btn-success:hover { background: #2a5a2a; }
+.btn-outline { background: transparent; color: #8892b0; border-color: #0f3460; }
+.btn-outline:hover { background: #0f3460; color: #e0e0e0; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* ===== Sections ===== */
+.section { margin-bottom: 24px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-header h2 { font-size: 16px; font-weight: 600; color: #ccd6f6; }
+/* ===== Job Cards ===== */
+.jobs-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.job-card { background: #16213e; border-radius: 10px; border: 1px solid #0f3460; overflow: hidden; }
+.job-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; background: #1a2744; border-bottom: 1px solid #0f3460;
+}
+.job-card-header .job-name { font-weight: 600; color: #ccd6f6; }
+.job-card-header .job-id { font-size: 11px; color: #8892b0; font-family: monospace; }
+.job-card-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.job-info-row { display: flex; justify-content: space-between; font-size: 13px; }
+.job-info-row .info-label { color: #8892b0; }
+.job-info-row .info-value { color: #e0e0e0; }
+.job-actions { display: flex; gap: 8px; margin-top: 8px; }
+/* ===== Status Badge ===== */
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+}
+.badge-completed { background: #1a3a1a; color: #81c784; }
+.badge-failed { background: #3a1a1a; color: #ff8a80; }
+.badge-running { background: #3a3a1a; color: #ffd54f; }
+.badge-never { background: #2a2a3e; color: #8892b0; }
+/* ===== History Section ===== */
+.history-toggle {
+  width: 100%; padding: 8px 16px; background: #0f3460; color: #8892b0;
+  border: none; cursor: pointer; font-size: 13px; text-align: left;
+  display: flex; align-items: center; gap: 6px; transition: background 0.2s;
+}
+.history-toggle:hover { background: #1a5276; color: #e0e0e0; }
+.history-toggle .arrow { transition: transform 0.2s; }
+.history-toggle .arrow.open { transform: rotate(90deg); }
+.history-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+.history-content.open { max-height: 600px; }
+/* ===== History Table ===== */
+.history-table-wrap { overflow-x: auto; }
+.history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.history-table th {
+  background: #0f3460; color: #8892b0; padding: 8px 10px; text-align: left;
+  font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.3px;
+  white-space: nowrap; position: sticky; top: 0;
+}
+.history-table td { padding: 7px 10px; border-bottom: 1px solid #0a1a2e; white-space: nowrap; }
+.history-table tr:nth-child(even) td { background: rgba(15,52,96,0.15); }
+.history-table tr:hover td { background: rgba(15,52,96,0.3); }
+.history-table .error-cell { color: #ff8a80; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-empty { padding: 16px; text-align: center; color: #8892b0; font-size: 13px; }
+/* ===== Loading ===== */
+.loading { display: flex; align-items: center; justify-content: center; padding: 40px; color: #8892b0; gap: 8px; }
+.spinner { width: 20px; height: 20px; border: 2px solid #0f3460; border-top-color: #e0e0e0; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* ===== Empty State ===== */
+.empty-state { padding: 32px; text-align: center; color: #8892b0; }
+.empty-state h3 { color: #ccd6f6; margin-bottom: 8px; }
+/* ===== Toast ===== */
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  padding: 12px 20px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  animation: slideIn 0.3s ease; max-width: 360px;
+}
+.toast-success { background: #1a3a1a; border: 1px solid #4caf50; color: #81c784; }
+.toast-error { background: #3a1a1a; border: 1px solid #f44336; color: #ff8a80; }
+.toast-info { background: #0f3460; border: 1px solid #2196f3; color: #90caf9; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+/* ===== Footer ===== */
+.footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 0; border-top: 1px solid #0f3460; margin-top: 24px;
+  font-size: 12px; color: #8892b0;
+}
+</style>
 </head>
 <body>
-<h1>DS3 Backup Dashboard</h1>
-<p>Loading dashboard...</p>
+<div class="container">
+  <!-- Header -->
+  <header class="header">
+    <div class="header-title">
+      <div>
+        <h1>DS3 Backup</h1>
+        <div class="subtitle">Desktop Backup Daemon</div>
+      </div>
+    </div>
+    <div class="connection-status">
+      <span class="status-dot disconnected" id="connDot"></span>
+      <span id="connText">Connecting...</span>
+    </div>
+  </header>
+
+  <!-- Error Banner -->
+  <div class="error-banner" id="errorBanner">
+    ⚠ <span id="errorText">Connection to daemon lost</span>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar" id="statusBar">
+    <div class="status-card">
+      <span class="label">Scheduler</span>
+      <span class="value" id="schedulerStatus">—</span>
+    </div>
+    <div class="status-card">
+      <span class="label">Scheduled Jobs</span>
+      <span class="value" id="scheduledCount">—</span>
+    </div>
+    <div class="status-card">
+      <span class="label">API Port</span>
+      <span class="value" id="apiPort">—</span>
+    </div>
+    <div class="status-card">
+      <span class="label">Daemon Uptime</span>
+      <span class="value" id="daemonUptime">—</span>
+    </div>
+  </div>
+
+  <!-- Actions Bar -->
+  <div class="section" style="display:flex; gap:8px; margin-bottom:16px;">
+    <button class="btn btn-primary" id="btnStartScheduler" style="display:none;" onclick="toggleScheduler()">▶ Start Scheduler</button>
+    <button class="btn btn-danger" id="btnStopScheduler" onclick="toggleScheduler()">⏹ Stop Scheduler</button>
+    <button class="btn btn-outline" onclick="refreshNow()">🔄 Refresh Now</button>
+  </div>
+
+  <!-- Loading State -->
+  <div class="loading" id="loadingIndicator">
+    <div class="spinner"></div>
+    <span>Loading dashboard...</span>
+  </div>
+
+  <!-- Jobs Section -->
+  <div class="section" id="jobsSection" style="display:none;">
+    <div class="section-header">
+      <h2>Backup Jobs</h2>
+      <span id="jobCount" style="font-size:13px; color:#8892b0;"></span>
+    </div>
+    <div class="jobs-container" id="jobsContainer"></div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span id="lastRefresh">Last updated: —</span>
+    <span id="refreshIndicator">Auto-refresh every 5s</span>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
 <script>
-fetch('/api/v1/status')
-  .then(r => r.json())
-  .then(s => {
-    document.querySelector('h1').textContent = 'DS3 Backup - ' + (s.running ? 'Running' : 'Stopped');
+// ===== Configuration =====
+const REFRESH_INTERVAL = 5000;
+
+// ===== State =====
+let statusData = null;
+let jobsData = null;
+let historyCache = {};
+let lastRefresh = null;
+let refreshTimer = null;
+let isRefreshing = false;
+
+// ===== Fetch Helpers =====
+async function apiGet(path) {
+  const resp = await fetch(path);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+async function apiPost(path) {
+  const resp = await fetch(path, { method: 'POST' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ===== Formatting =====
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function formatDuration(ns) {
+  if (!ns) return '—';
+  const totalSec = Math.floor(ns / 1e9);
+  if (totalSec < 60) return totalSec + 's';
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min < 60) return min + 'm ' + sec + 's';
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return hr + 'h ' + remMin + 'm';
+}
+
+function formatTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
   });
+}
+
+function formatStatus(status) {
+  switch (status) {
+    case 'completed': return '<span class="badge badge-completed">Completed</span>';
+    case 'failed': return '<span class="badge badge-failed">Failed</span>';
+    case 'running': return '<span class="badge badge-running">Running</span>';
+    default: return '<span class="badge badge-never">' + (status || '—') + '</span>';
+  }
+}
+
+// ===== Toast =====
+function showToast(message, type) {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => { toast.remove(); }, 3000);
+}
+
+// ===== Error Banner =====
+function showError(msg) {
+  document.getElementById('errorBanner').classList.add('visible');
+  document.getElementById('errorText').textContent = msg;
+}
+
+function hideError() {
+  document.getElementById('errorBanner').classList.remove('visible');
+}
+
+// ===== Main Load =====
+async function loadDashboard() {
+  if (isRefreshing) return;
+  isRefreshing = true;
+  try {
+    await Promise.all([loadStatus(), loadJobs()]);
+    hideError();
+    document.getElementById('connDot').className = 'status-dot connected';
+    document.getElementById('connText').textContent = 'Connected';
+  } catch (err) {
+    showError('Connection to daemon lost — retrying...');
+    document.getElementById('connDot').className = 'status-dot disconnected';
+    document.getElementById('connText').textContent = 'Offline';
+  }
+  isRefreshing = false;
+  lastRefresh = new Date();
+  document.getElementById('lastRefresh').textContent = 'Last updated: ' + lastRefresh.toLocaleTimeString();
+}
+
+async function loadStatus() {
+  const status = await apiGet('/api/v1/status');
+  statusData = status;
+
+  const schedEl = document.getElementById('schedulerStatus');
+  schedEl.textContent = status.schedulerRunning ? 'Running' : 'Stopped';
+  schedEl.className = 'value ' + (status.schedulerRunning ? 'running' : 'stopped');
+
+  document.getElementById('scheduledCount').textContent = status.scheduledJobs;
+  document.getElementById('apiPort').textContent = status.apiPort;
+  document.getElementById('daemonUptime').textContent = status.uptime || '—';
+
+  document.getElementById('btnStartScheduler').style.display = status.schedulerRunning ? 'none' : '';
+  document.getElementById('btnStopScheduler').style.display = status.schedulerRunning ? '' : 'none';
+}
+
+async function loadJobs() {
+  const data = await apiGet('/api/v1/jobs');
+  jobsData = data.jobs || [];
+
+  document.getElementById('loadingIndicator').style.display = 'none';
+  document.getElementById('jobsSection').style.display = '';
+
+  const countEl = document.getElementById('jobCount');
+  countEl.textContent = jobsData.length + ' job' + (jobsData.length !== 1 ? 's' : '');
+
+  const container = document.getElementById('jobsContainer');
+  container.innerHTML = '';
+
+  if (jobsData.length === 0) {
+    container.innerHTML = '<div class="empty-state"><h3>No backup jobs configured</h3><p>Use the CLI to add jobs: <code>ds3backup job add</code></p></div>';
+    return;
+  }
+
+  // Sort jobs: enabled first, then by name
+  jobsData.sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  for (const job of jobsData) {
+    const card = await createJobCard(job);
+    container.appendChild(card);
+  }
+}
+
+async function createJobCard(job) {
+  const card = document.createElement('div');
+  card.className = 'job-card';
+  card.id = 'job-' + job.id;
+
+  const lastRunStatus = job.lastRun
+    ? await getJobLastRunStatus(job.id)
+    : 'never';
+
+  card.innerHTML = `
+    <div class="job-card-header">
+      <div>
+        <div class="job-name">${escapeHtml(job.name || job.id)}</div>
+        <div class="job-id">${escapeHtml(job.id)}</div>
+      </div>
+      <div>${formatStatus(job.enabled ? lastRunStatus : 'disabled')}</div>
+    </div>
+    <div class="job-card-body">
+      <div class="job-info-row">
+        <span class="info-label">Source</span>
+        <span class="info-value">${escapeHtml(job.sourcePath || '—')}</span>
+      </div>
+      <div class="job-info-row">
+        <span class="info-label">Schedule</span>
+        <span class="info-value">${job.scheduleEnabled ? escapeHtml(job.cronExpr || 'enabled') : 'Manual only'}</span>
+      </div>
+      <div class="job-info-row">
+        <span class="info-label">Next Run</span>
+        <span class="info-value">${formatTime(job.nextRun)}</span>
+      </div>
+      <div class="job-info-row">
+        <span class="info-label">Retention</span>
+        <span class="info-value">${job.retentionDays || '—'} days</span>
+      </div>
+      ${job.lastError ? `<div class="job-info-row"><span class="info-label" style="color:#ff8a80;">Last Error</span><span class="info-value" style="color:#ff8a80;">${escapeHtml(job.lastError)}</span></div>` : ''}
+      <div class="job-actions">
+        <button class="btn btn-primary btn-sm" onclick="triggerBackup('${job.id}')" id="runBtn-${job.id}">▶ Run Backup</button>
+      </div>
+    </div>
+    <button class="history-toggle" onclick="toggleHistory('${job.id}')">
+      <span class="arrow" id="arrow-${job.id}">▶</span> Show History
+    </button>
+    <div class="history-content" id="history-${job.id}">
+      <div class="loading" id="historyLoading-${job.id}">
+        <div class="spinner"></div>
+        <span>Loading history...</span>
+      </div>
+    </div>
+  `;
+
+  return card;
+}
+
+async function getJobLastRunStatus(jobId) {
+  try {
+    if (historyCache[jobId] && historyCache[jobId].length > 0) {
+      return historyCache[jobId][0].status;
+    }
+    const data = await apiGet('/api/v1/jobs/' + jobId + '/history');
+    historyCache[jobId] = data.runs || [];
+    if (historyCache[jobId].length > 0) {
+      return historyCache[jobId][0].status;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return 'never';
+}
+
+async function toggleHistory(jobId) {
+  const content = document.getElementById('history-' + jobId);
+  const arrow = document.getElementById('arrow-' + jobIdipse);
+  const isOpen = content.classList.contains('open');
+
+  if (isOpen) {
+    content.classList.remove('open');
+    arrow.className = 'arrow';
+    return;
+  }
+
+  content.classList.add('open');
+  arrow.className = 'arrow open';
+
+  // Load history if not already loaded
+  if (content.querySelector('.loading')) {
+    try {
+      let runs = historyCache[jobId];
+      if (!runs) {
+        const data = await apiGet('/api/v1/jobs/' + jobId + '/history');
+        runs = data.runs || [];
+        historyCache[jobId] = runs;
+      }
+      renderHistoryTable(jobId, runs);
+    } catch (err) {
+      content.querySelector('.loading').innerHTML = '<div class="history-empty">Failed to load history</div>';
+    }
+  }
+}
+
+function renderHistoryTable(jobId, runs) {
+  const content = document.getElementById('history-' + jobId);
+  if (!runs || runs.length === 0) {
+    content.innerHTML = '<div class="history-empty">No backup runs yet.</div>';
+    return;
+  }
+
+  let html = '<div class="history-table-wrap"><table class="history-table"><thead><tr>' +
+    '<th>Date/Time</th><th>Status</th><th>Added</th><th>Changed</th><th>Size</th><th>Duration</th>' +
+    (runs.some(r => r.error) ? '<th>Error</th>' : '') +
+    '</tr></thead><tbody>';
+
+  for (const run of runs) {
+    html += '<tr>' +
+      '<td>' + formatTime(run.runTime || run.startTime) + '</td>' +
+      '<td>' + formatStatus(run.status) + '</td>' +
+      '<td>' + (run.filesAdded || 0) + '</td>' +
+      '<td>' + (run.filesChanged || 0) + '</td>' +
+      '<td>' + formatBytes(run.bytesUploaded) + '</td>' +
+      '<td>' + formatDuration(run.duration) + '</td>' +
+      (run.error ? '<td class="error-cell" title="' + escapeHtml(run.error) + '">' + escapeHtml(run.error) + '</td>' : '') +
+      '</tr>';
+  }
+
+  html += '</tbody></table></div>';
+  content.innerHTML = html;
+}
+
+// ===== Actions =====
+async function triggerBackup(jobId) {
+  const btn = document.getElementById('runBtn-' + jobId);
+  btn.disabled = true;
+  btn.textContent = '⏳ Triggering...';
+  try {
+    const resp = await apiPost('/api/v1/backup/run/' + jobId);
+    showToast('Backup triggered for ' + jobId, 'success');
+    // Re-fetch history after a delay
+    setTimeout(async () => {
+      try {
+        const data = await apiGet('/api/v1/jobs/' + jobId + '/history');
+        historyCache[jobId] = data.runs || [];
+        if (document.getElementById('history-' + jobId).classList.contains('open')) {
+          renderHistoryTable(jobId, historyCache[jobId]);
+        }
+        // Re-render just the status badge
+        if (historyCache[jobId].length > 0) {
+          const header = document.querySelector('#job-' + jobId + ' .job-card-header > div:last-child');
+          if (header) header.innerHTML = formatStatus(historyCache[jobId][0].status);
+        }
+      } catch (e) { /* ignore */ }
+    }, 2000);
+  } catch (err) {
+    showToast('Failed to trigger backup: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Backup';
+  }
+}
+
+async function toggleScheduler() {
+  const isRunning = statusData && statusData.schedulerRunning;
+  try {
+    if (isRunning) {
+      await apiPost('/api/v1/stop');
+      showToast('Scheduler stopped', 'info');
+    } else {
+      await apiPost('/api/v1/start');
+      showToast('Scheduler started', 'success');
+    }
+    await loadStatus();
+  } catch (err) {
+    showToast('Failed to toggle scheduler: ' + err.message, 'error');
+  }
+}
+
+function refreshNow() {
+  loadDashboard();
+}
+
+// ===== Helpers =====
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== Initialization =====
+document.addEventListener('DOMContentLoaded', () => {
+  loadDashboard();
+  refreshTimer = setInterval(loadDashboard, REFRESH_INTERVAL);
+});
 </script>
 </body>
 </html>
