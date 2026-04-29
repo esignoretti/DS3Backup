@@ -10,13 +10,15 @@ type BackupJob struct {
 	Name             string    `json:"name"`
 	SourcePath       string    `json:"sourcePath"`
 	RetentionDays    int       `json:"retentionDays"`
-	ObjectLockMode   string    `json:"objectLockMode"` // "GOVERNANCE" or "COMPLIANCE"
+	ObjectLockMode   string    `json:"objectLockMode"`
 	Enabled          bool      `json:"enabled"`
-	EncryptionPassword string  `json:"encryptionPassword"` // Stored in config (ensure file permissions are secure)
+	EncryptionPassword string  `json:"encryptionPassword"`
 	CreatedAt        time.Time `json:"createdAt"`
 	LastRun          *time.Time `json:"lastRun,omitempty"`
 	NextRun          time.Time `json:"nextRun"`
 	LastError        string    `json:"lastError,omitempty"`
+	ScheduleEnabled  bool      `json:"scheduleEnabled"`
+	CronExpr         string    `json:"cronExpr,omitempty"`
 }
 
 // FileEntry represents a file in the backup index

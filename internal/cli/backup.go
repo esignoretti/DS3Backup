@@ -273,11 +273,40 @@ var backupListCmd = &cobra.Command{
 		}
 
 		if len(runs) == 0 {
-			if backupListJSON {
-				fmt.Println("[]")
-			} else {
-				fmt.Println("No backup runs found for this job.")
+			// Try to list backups from S3
+			fmt.Println("ℹ️  No local backup history found. Checking S3...")
+			s3Client, err := s3client.NewClient(cfg.S3)
+			if err != nil {
+				if backupListJSON {
+					fmt.Println("[]")
+				} else {
+					fmt.Println("No backup runs found for this job.")
+				}
+				return nil
 			}
+			
+			// List backup directories from S3
+			backupPrefix := fmt.Sprintf("backups/%s/", jobID)
+			objects, err := s3Client.ListObjects(cmd.Context(), backupPrefix)
+			if err != nil || len(objects) == 0 {
+				if backupListJSON {
+					fmt.Println("[]")
+				} else {
+					fmt.Println("No backup runs found for this job.")
+				}
+				return nil
+			}
+			
+			// Extract backup timestamps from S3 paths
+			fmt.Printf("\n📦 Found %d backup(s) on S3:\n\n", len(objects))
+			for i, obj := range objects {
+				// Path format: backups/<job-id>/batch_<timestamp> or backups/<job-id>/index_<timestamp>
+				parts := strings.Split(obj, "/")
+				if len(parts) > 0 {
+					fmt.Printf("%d. %s\n", i+1, parts[len(parts)-1])
+				}
+			}
+			fmt.Println("\n💡 Tip: Run 'backup run' to rebuild local index")
 			return nil
 		}
 

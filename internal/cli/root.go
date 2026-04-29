@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -11,15 +13,17 @@ import (
 )
 
 var (
-	cfgFile     string
-	endpoint    string
-	bucket      string
-	accessKey   string
-	secretKey   string
-	password    string
-	region      string
-	objectLock  string
+	cfgFile       string
+	endpoint      string
+	bucket        string
+	accessKey     string
+	secretKey     string
+	password      string
+	region        string
+	objectLock    string
 	retentionDays int
+	verbose       bool
+	logFile       *os.File
 )
 
 // rootCmd represents the base command
@@ -38,8 +42,48 @@ Features:
 }
 
 // Execute runs the root command
+// preRunSetup checks flags and sets up logging before command execution
+func preRunSetup() {
+	// Check if verbose flag is set in args
+	for _, arg := range os.Args[1:] {
+		if arg == "-v" || arg == "--verbose" {
+			verbose = true
+			break
+		}
+	}
+	
+	// Setup logging to file
+	logDir := filepath.Join(mustHomeDir(), ".ds3backup")
+	if err := os.MkdirAll(logDir, 0755); err == nil {
+		var err error
+		logPath := filepath.Join(logDir, "ds3backup.log")
+		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			var output io.Writer = logFile
+			if verbose {
+				output = io.MultiWriter(logFile, os.Stderr)
+			}
+			log.SetOutput(output)
+			log.SetFlags(log.Ldate | log.Ltime)
+			log.Printf("=== DS3Backup Started (verbose=%v) ===", verbose)
+		}
+	}
+}
+
+
 func Execute() {
+	preRunSetup()
+	
+	defer func() {
+		if logFile != nil {
+			logFile.Close()
+		}
+	}()
+	
 	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
+		if verbose {
+			log.Printf("ERROR: %v", err)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -50,6 +94,27 @@ func init() {
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.ds3backup/config.json)")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	
+	// Log every command execution
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		// Build command string
+		cmdPath := cmd.CommandPath()
+		if len(args) > 0 {
+			cmdPath += " " + fmt.Sprint(args)
+		}
+		log.Printf("Command: %s", cmdPath)
+	}
+}
+
+// mustHomeDir returns the home directory or exits
+func mustHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error finding home directory:", err)
+		os.Exit(1)
+	}
+	return home
 }
 
 // initConfig reads in config file
@@ -59,15 +124,8 @@ func initConfig() {
 		return
 	}
 
-	// Find home directory
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error finding home directory:", err)
-		os.Exit(1)
-	}
-
 	// Search config in home directory
-	cfgFile = filepath.Join(home, ".ds3backup", "config.json")
+	cfgFile = filepath.Join(mustHomeDir(), ".ds3backup", "config.json")
 }
 
 // loadConfig loads the configuration file
@@ -82,4 +140,14 @@ func loadConfig() (*config.Config, error) {
 // saveConfig saves the configuration file
 func saveConfig(cfg *config.Config) error {
 	return cfg.SaveConfig()
+}
+
+// IsVerbose returns true if verbose mode is enabled
+func IsVerbose() bool {
+	return verbose
+}
+
+// GetLogFile returns the log file
+func GetLogFile() *os.File {
+	return logFile
 }

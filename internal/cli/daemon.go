@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -28,9 +29,10 @@ import (
 
 // Daemon-level package vars for flags
 var (
-	daemonPort  int
-	daemonNoAPI bool
-	daemonNoTray bool
+	daemonPort     int
+	daemonNoAPI    bool
+	daemonNoTray   bool
+	daemonForeground bool
 )
 
 // pidFileDir returns the directory for the PID file.
@@ -122,9 +124,9 @@ var daemonCmd = &cobra.Command{
 	Long:  `Start, stop, and manage the background backup daemon process.`,
 }
 
-// daemonRunCmd represents the `ds3backup daemon run` command.
+// daemonRunCmd represents the `ds3backup daemon start` command.
 var daemonRunCmd = &cobra.Command{
-	Use:   "run",
+	Use:   "start",
 	Short: "Start the backup daemon",
 	Long: `Starts the background daemon with scheduler, API server, and optional system tray.
 
@@ -132,15 +134,49 @@ The daemon runs as a long-lived process, managing scheduled backups and exposing
 a local HTTP API for status queries and control.
 
 Examples:
-  ds3backup daemon run
-  ds3backup daemon run --no-tray
-  ds3backup daemon run --port 9100`,
+  ds3backup daemon start
+  ds3backup daemon start --no-tray
+  ds3backup daemon start --port 9100`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Load config
-		cfg, err := loadConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
+		// If not in foreground mode, fork to background
+		if !daemonForeground {
+			execPath, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("failed to get executable path: %w", err)
+			}
+
+			// Build args for background process
+			bgArgs := []string{"daemon", "start", "--foreground"}
+			if daemonPort != 0 {
+				bgArgs = append(bgArgs, "--port", fmt.Sprintf("%d", daemonPort))
+			}
+			if daemonNoAPI {
+				bgArgs = append(bgArgs, "--no-api")
+			}
+			if daemonNoTray {
+				bgArgs = append(bgArgs, "--no-tray")
+			}
+
+			cmd := exec.Command(execPath, bgArgs...)
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+			cmd.Stdin = nil
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("failed to start daemon: %w", err)
+			}
+
+			// Wait briefly for daemon to start
+			time.Sleep(500 * time.Millisecond)
+			log.Printf("Daemon started (PID: %d)", cmd.Process.Pid)
+			return nil
 		}
+
+	// Foreground mode — the actual daemon process
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
 		log.Println("Starting daemon...")
 
@@ -186,19 +222,20 @@ Examples:
 			log.Printf("API server listening on 127.0.0.1:%d", daemonPort)
 		}
 
-		// 7. Start system tray (macOS only)
-		var trayApp *tray.TrayApp
-		if !daemonNoTray && !daemonNoAPI && runtime.GOOS == "darwin" {
-			trayApp = tray.NewTrayApp(daemonPort)
-			go func() {
-				if err := trayApp.Run(); err != nil {
-					log.Printf("System tray error: %v", err)
-				}
-			}()
-			// Give the tray a moment to initialize
-			time.Sleep(500 * time.Millisecond)
-			log.Println("System tray started")
-		}
+	// 7. Start system tray (macOS with display only)
+	var trayApp *tray.TrayApp
+	if !daemonNoTray && !daemonNoAPI && runtime.GOOS == "darwin" && os.Getenv("DISPLAY") != "" {
+		trayApp = tray.NewTrayApp(daemonPort)
+		go func() {
+			if err := trayApp.Run(); err != nil {
+				log.Printf("System tray error: %v", err)
+			}
+		}()
+		time.Sleep(500 * time.Millisecond)
+		log.Println("System tray started")
+	} else if !daemonNoTray && runtime.GOOS == "darwin" {
+		log.Println("No display available, running in headless mode (use --no-tray to suppress)")
+	}
 
 		log.Printf("Daemon running on port %d", daemonPort)
 
@@ -447,6 +484,7 @@ func init() {
 	daemonRunCmd.Flags().IntVar(&daemonPort, "port", 0, "API server port (default: from config or 8099)")
 	daemonRunCmd.Flags().BoolVar(&daemonNoAPI, "no-api", false, "Start scheduler without API server")
 	daemonRunCmd.Flags().BoolVar(&daemonNoTray, "no-tray", false, "Start in headless mode (no system tray)")
+	daemonRunCmd.Flags().BoolVar(&daemonForeground, "foreground", false, "Run in foreground (used internally)")
 
 	// Flags on daemonStatusCmd
 	daemonStatusCmd.Flags().IntVar(&daemonPort, "port", 0, "API server port (default: from config or 8099)")
