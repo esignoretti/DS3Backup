@@ -54,13 +54,13 @@ func (s *APIServer) Start() error {
 
 // Stop gracefully shuts down the HTTP server with a 5-second timeout.
 func (s *APIServer) Stop() error {
-	s.mu.RLock()
+	s.mu.Lock()
 	svr := s.server
-	s.mu.RUnlock()
-
 	if svr == nil {
+		s.mu.Unlock()
 		return nil
 	}
+	s.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -69,6 +69,12 @@ func (s *APIServer) Stop() error {
 	if err := svr.Shutdown(ctx); err != nil {
 		return fmt.Errorf("API server shutdown error: %w", err)
 	}
+
+	// Clear the server reference so IsRunning returns false.
+	s.mu.Lock()
+	s.server = nil
+	s.mu.Unlock()
+
 	log.Printf("API server stopped")
 	return nil
 }

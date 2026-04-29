@@ -348,3 +348,193 @@ func TestRunBackup_JobNotFound(t *testing.T) {
 		t.Error("expected non-empty error message")
 	}
 }
+
+// TestAPIResponseFormat_Status verifies the JSON structure of the status response
+// has all required fields.
+
+func TestAPIResponseFormat_Status(t *testing.T) {
+	runner := &mockRunner{running: true, jobs: []string{"job1"}}
+	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
+	s := newTestServer(runner, jm)
+	s.mu.Lock()
+	s.startTime = time.Now().Add(-2 * time.Hour)
+	s.mu.Unlock()
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/status", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	// Verify all required fields are present
+	requiredFields := []string{"running", "schedulerRunning", "scheduledJobs", "apiPort", "uptime"}
+	for _, field := range requiredFields {
+		if _, ok := resp[field]; !ok {
+			t.Errorf("missing required field: %s", field)
+		}
+	}
+
+	// Verify boolean types
+	if _, ok := resp["running"].(bool); !ok {
+		t.Error("expected running to be boolean")
+	}
+	if _, ok := resp["schedulerRunning"].(bool); !ok {
+		t.Error("expected schedulerRunning to be boolean")
+	}
+
+	// Verify numeric types
+	if _, ok := resp["scheduledJobs"].(float64); !ok {
+		t.Error("expected scheduledJobs to be numeric")
+	}
+	if _, ok := resp["apiPort"].(float64); !ok {
+		t.Error("expected apiPort to be numeric")
+	}
+
+	// Verify string type
+	if _, ok := resp["uptime"].(string); !ok {
+		t.Error("expected uptime to be string")
+	}
+}
+
+// TestAPIResponseFormat_JobList verifies the job list response structure.
+
+func TestAPIResponseFormat_JobList(t *testing.T) {
+	now := time.Now()
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"job1": {
+				ID:              "job1",
+				Name:            "Test Job",
+				SourcePath:      "/tmp/test",
+				RetentionDays:   30,
+				ObjectLockMode:  "GOVERNANCE",
+				Enabled:         true,
+				CreatedAt:       now,
+				NextRun:         now.Add(1 * time.Hour),
+				ScheduleEnabled: true,
+				CronExpr:        "0 * * * *",
+			},
+		},
+	}
+	s := newTestServer(runner, jm)
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	// Verify jobs array exists
+	jobs, ok := resp["jobs"].([]interface{})
+	if !ok {
+		t.Fatal("expected jobs to be an array")
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+
+	job, ok := jobs[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected job to be an object")
+	}
+
+	// Verify required fields in each job
+	requiredFields := []string{"id", "name", "sourcePath", "retentionDays",
+		"objectLockMode", "enabled", "createdAt", "scheduleEnabled"}
+	for _, field := range requiredFields {
+		if _, ok := job[field]; !ok {
+			t.Errorf("missing required field: %s", field)
+		}
+	}
+
+	// Verify EncryptionPassword is NOT present
+	if _, ok := job["encryptionPassword"]; ok {
+		t.Error("encryptionPassword field should NOT be in job response")
+	}
+}
+
+// TestAPIResponseFormat_Error verifies the error response format (404 case).
+
+func TestAPIResponseFormat_Error(t *testing.T) {
+	runner := &mockRunner{}
+	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
+	s := newTestServer(runner, jm)
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/nonexistent", "")
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	// Verify error response has required fields
+	if _, ok := resp["error"]; !ok {
+		t.Error("missing required field: error")
+	}
+	if _, ok := resp["code"]; !ok {
+		t.Error("missing required field: code")
+	}
+
+	// Verify code is numeric and equals 404
+	code, ok := resp["code"].(float64)
+	if !ok {
+		t.Fatal("expected code to be numeric")
+	}
+	if int(code) != 404 {
+		t.Errorf("expected code 404, got %v", code)
+	}
+
+	errMsg, ok := resp["error"].(string)
+	if !ok {
+		t.Fatal("expected error to be string")
+	}
+	if errMsg == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestAPIServer_StartStopLifecycle verifies the server lifecycle:
+// start, IsRunning, stop, not running.
+
+func TestAPIServer_StartStopLifecycle(t *testing.T) {
+	runner := &mockRunner{}
+	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
+	s := NewAPIServer(0, runner, jm)
+
+	if s.IsRunning() {
+		t.Error("expected server not to be running before Start")
+	}
+
+	// Start (port 0 lets the test bind without conflicts)
+	if err := s.Start(); err != nil {
+		t.Fatalf("expected no error starting server, got: %v", err)
+	}
+
+	if !s.IsRunning() {
+		t.Error("expected server to be running after Start")
+	}
+
+	// Stop
+	if err := s.Stop(); err != nil {
+		t.Fatalf("expected no error stopping server, got: %v", err)
+	}
+
+	if s.IsRunning() {
+		t.Error("expected server not to be running after Stop")
+	}
+}
