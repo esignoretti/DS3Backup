@@ -214,7 +214,7 @@ Examples:
 		// 6. Start API server
 		var apiServer *api.APIServer
 		if !daemonNoAPI {
-			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter)
+			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, nil)
 			if err := apiServer.Start(); err != nil {
 				removePIDFile()
 				return fmt.Errorf("failed to start API server: %w", err)

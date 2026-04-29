@@ -46,9 +46,9 @@ func (m *mockJobManager) GetAllJobs() []models.BackupJob {
 }
 
 // newTestServer creates an APIServer with mock dependencies for testing.
-func newTestServer(runner *mockRunner, jobManager *mockJobManager) *APIServer {
+func newTestServer(runner *mockRunner, jobManager *mockJobManager, historyProvider HistoryProvider) *APIServer {
 	runner.runCalled = make(chan string, 1)
-	return NewAPIServer(8099, runner, jobManager)
+	return NewAPIServer(8099, runner, jobManager, historyProvider)
 }
 
 // executeRequest performs an HTTP request against the server's router.
@@ -63,14 +63,14 @@ func executeRequest(s *APIServer, method, path string, body string) *httptest.Re
 func TestGetStatus(t *testing.T) {
 	runner := &mockRunner{running: true, jobs: []string{"job1", "job2"}}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
+
 	// Set startTime so uptime is non-zero
 	s.mu.Lock()
 	s.startTime = time.Now().Add(-1 * time.Hour)
 	s.mu.Unlock()
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/status", "")
-
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", w.Code)
 	}
@@ -97,7 +97,7 @@ func TestGetStatus(t *testing.T) {
 func TestStartStop(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	// Start
 	w := executeRequest(s, http.MethodPost, "/api/v1/start", "")
@@ -137,7 +137,7 @@ func TestStartStop(t *testing.T) {
 func TestListJobs_Empty(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/jobs", "")
 
@@ -177,7 +177,7 @@ func TestListJobs_WithJobs(t *testing.T) {
 			},
 		},
 	}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/jobs", "")
 
@@ -232,7 +232,7 @@ func TestGetJob_Found(t *testing.T) {
 			},
 		},
 	}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/job1", "")
 
@@ -265,7 +265,7 @@ func TestGetJob_Found(t *testing.T) {
 func TestGetJob_NotFound(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/nonexistent", "")
 
@@ -295,7 +295,7 @@ func TestRunBackup_TriggersJob(t *testing.T) {
 			},
 		},
 	}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodPost, "/api/v1/backup/run/job1", "")
 
@@ -332,7 +332,7 @@ func TestRunBackup_TriggersJob(t *testing.T) {
 func TestRunBackup_JobNotFound(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodPost, "/api/v1/backup/run/invalid", "")
 
@@ -355,7 +355,7 @@ func TestRunBackup_JobNotFound(t *testing.T) {
 func TestAPIResponseFormat_Status(t *testing.T) {
 	runner := &mockRunner{running: true, jobs: []string{"job1"}}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 	s.mu.Lock()
 	s.startTime = time.Now().Add(-2 * time.Hour)
 	s.mu.Unlock()
@@ -422,7 +422,7 @@ func TestAPIResponseFormat_JobList(t *testing.T) {
 			},
 		},
 	}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/jobs", "")
 
@@ -469,7 +469,7 @@ func TestAPIResponseFormat_JobList(t *testing.T) {
 func TestAPIResponseFormat_Error(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := newTestServer(runner, jm)
+	s := newTestServer(runner, jm, nil)
 
 	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/nonexistent", "")
 
@@ -508,13 +508,138 @@ func TestAPIResponseFormat_Error(t *testing.T) {
 	}
 }
 
+// mockHistoryProvider implements HistoryProvider for testing.
+type mockHistoryProvider struct {
+	history map[string][]*models.BackupRun
+}
+
+func (m *mockHistoryProvider) GetJobHistory(jobID string, limit int) ([]*models.BackupRun, error) {
+	runs := m.history[jobID]
+	if runs == nil {
+		return []*models.BackupRun{}, nil
+	}
+	if limit > 0 && len(runs) > limit {
+		return runs[:limit], nil
+	}
+	return runs, nil
+}
+
+func TestGetJobHistory_Found(t *testing.T) {
+	now := time.Now()
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"job1": {ID: "job1", Name: "Test Job"},
+		},
+	}
+	hp := &mockHistoryProvider{
+		history: map[string][]*models.BackupRun{
+			"job1": {
+				{
+					JobID:         "job1",
+					RunTime:       now.Add(-1 * time.Hour),
+					Status:        "completed",
+					FilesAdded:    10,
+					FilesChanged:  5,
+					BytesUploaded: 1024,
+					Duration:      30 * time.Second,
+					StartTime:     now.Add(-1 * time.Hour),
+					EndTime:       now.Add(-1 * time.Hour).Add(30 * time.Second),
+				},
+				{
+					JobID:         "job1",
+					RunTime:       now.Add(-2 * time.Hour),
+					Status:        "failed",
+					FilesAdded:    0,
+					FilesChanged:  0,
+					BytesUploaded: 0,
+					Error:         "connection timeout",
+					Duration:      10 * time.Second,
+					StartTime:     now.Add(-2 * time.Hour),
+					EndTime:       now.Add(-2 * time.Hour).Add(10 * time.Second),
+				},
+			},
+		},
+	}
+	s := newTestServer(runner, jm, hp)
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/job1/history", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp HistoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.JobID != "job1" {
+		t.Errorf("expected jobID job1, got %s", resp.JobID)
+	}
+	if len(resp.Runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(resp.Runs))
+	}
+	if resp.Runs[0].Status != "completed" {
+		t.Errorf("expected first run status completed, got %s", resp.Runs[0].Status)
+	}
+	if resp.Runs[1].Status != "failed" {
+		t.Errorf("expected second run status failed, got %s", resp.Runs[1].Status)
+	}
+}
+
+func TestGetJobHistory_NoProvider(t *testing.T) {
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"job1": {ID: "job1", Name: "Test Job"},
+		},
+	}
+	s := newTestServer(runner, jm, nil)
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/job1/history", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp HistoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Runs) != 0 {
+		t.Errorf("expected empty runs array, got %d items", len(resp.Runs))
+	}
+}
+
+func TestGetJobHistory_JobNotFound(t *testing.T) {
+	runner := &mockRunner{}
+	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
+	s := newTestServer(runner, jm, nil)
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/nonexistent/history", "")
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
 // TestAPIServer_StartStopLifecycle verifies the server lifecycle:
 // start, IsRunning, stop, not running.
 
 func TestAPIServer_StartStopLifecycle(t *testing.T) {
 	runner := &mockRunner{}
 	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
-	s := NewAPIServer(0, runner, jm)
+	s := NewAPIServer(0, runner, jm, nil)
 
 	if s.IsRunning() {
 		t.Error("expected server not to be running before Start")
