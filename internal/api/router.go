@@ -37,6 +37,7 @@ func (s *APIServer) setupRouter() http.Handler {
 
 	// Backup endpoints
 	mux.HandleFunc("POST /api/v1/backup/run/{id}", s.handleRunBackup)
+	mux.HandleFunc("GET /api/v1/logs", s.handleGetLogs)
 
 	return mux
 }

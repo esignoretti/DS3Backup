@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/esignoretti/ds3backup/pkg/models"
@@ -148,4 +151,32 @@ func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) 
 		JobID: jobID,
 		Runs:  runs,
 	})
+}
+
+// handleGetLogs handles GET /api/v1/logs.
+func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	logPath := s.logPath
+	if logPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "cannot determine log path")
+			return
+		}
+		logPath = filepath.Join(home, ".ds3backup", "ds3backup.log")
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("log file not found: %s", logPath))
+		return
+	}
+
+	// Return last 200 lines
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > 200 {
+		lines = lines[len(lines)-200:]
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(strings.Join(lines, "\n")))
 }

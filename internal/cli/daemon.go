@@ -178,7 +178,12 @@ Examples:
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-		log.Println("Starting daemon...")
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config directory: %w", err)
+	}
+
+	log.Println("Starting daemon...")
 
 		// Determine port from flag or config
 		if daemonPort == 0 {
@@ -215,7 +220,8 @@ Examples:
 		// 6. Start API server
 		var apiServer *api.APIServer
 		if !daemonNoAPI {
-			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyProvider)
+			logPath := filepath.Join(configDir, "ds3backup.log")
+			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyProvider, logPath)
 			if err := apiServer.Start(); err != nil {
 				removePIDFile()
 				return fmt.Errorf("failed to start API server: %w", err)
