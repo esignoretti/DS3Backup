@@ -56,10 +56,10 @@ Delivered:
 **Plans**: 4 plans
 
 Plans:
-- [x] 02-01-PLAN.md — Scheduler engine + cron-based backup execution
-- [x] 02-02-PLAN.md — REST API server for daemon control
-- [x] 02-03-PLAN.md — Daemon mode + system tray integration
-- [x] 02-04-PLAN.md — Auto-start, health check, and graceful lifecycle
+- [x] 02-01-PLAN.md — Scheduler engine + cron-based backup execution (will-execute)
+- [x] 02-02-PLAN.md — REST API server for daemon control ✅ DONE
+- [x] 02-03-PLAN.md — Daemon mode + system tray integration (will-execute)
+- [x] 02-04-PLAN.md — Auto-start, health check, and graceful lifecycle (will-execute)
 
 ### Phase 3: Desktop UI (Planned)
 **Goal**: Cross-platform desktop application with progress notifications, backup history visualization, and one-click restore
@@ -89,6 +89,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
-| 2. Scheduling & Server | 4/4 | 🚧 Plans created, ready to execute | - |
+| 2. Scheduling & Server | 1/4 executed | 🚧 In progress (02-02 done) | - |
 | 3. Desktop UI | TBD | 📋 Planned | - |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
