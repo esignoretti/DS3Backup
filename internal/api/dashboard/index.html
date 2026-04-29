@@ -200,6 +200,7 @@ body {
   <div class="section" style="display:flex; gap:8px; margin-bottom:16px;">
     <button class="btn btn-primary" id="btnStartScheduler" style="display:none;" onclick="toggleScheduler()">▶ Start Scheduler</button>
     <button class="btn btn-danger" id="btnStopScheduler" onclick="toggleScheduler()">⏹ Stop Scheduler</button>
+    <button class="btn btn-outline" onclick="loadLogs()">📋 Show Logs</button>
     <button class="btn btn-outline" onclick="refreshNow()">🔄 Refresh Now</button>
   </div>
 
@@ -257,21 +258,33 @@ body {
         <input type="text" id="newJobCron" placeholder="e.g. 0 2 * * * (daily at 2am)" />
       </div>
     </div>
-    <div class="modal-footer">
+  <div class="modal-footer">
       <button class="btn btn-secondary" onclick="document.getElementById('addJobModal').classList.remove('open')">Cancel</button>
       <button class="btn btn-success" onclick="createJob()">Create Job</button>
     </div>
   </div>
 </div>
 
-<!-- Toast Container -->
-<div class="toast-container" id="toastContainer"></div>
+<!-- Logs Modal -->
+<div id="logsModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal" style="width:700px;">
+    <div class="modal-header">
+      <h3>Daemon Logs</h3>
+      <button class="modal-close" onclick="document.getElementById('logsModal').classList.remove('open')">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:400px; overflow-y:auto;">
+      <pre id="logsContent" style="margin:0; font-size:11px; line-height:1.4; color:#a8b2d1; white-space:pre-wrap; word-break:break-all;">Loading...</pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('logsModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
 
+</body>
 <script>
-// ===== Configuration =====
 const REFRESH_INTERVAL = 30000;
 
-// ===== State =====
 let statusData = null;
 let jobsData = null;
 let historyCache = {};
@@ -279,37 +292,60 @@ let lastRefresh = null;
 let refreshTimer = null;
 let isRefreshing = false;
 
-// ===== Fetch Helpers =====
 async function apiGet(path) {
   const resp = await fetch(path);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp.json();
 }
 
-async function apiPost(path) {
-  const resp = await fetch(path, { method: 'POST' });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
+async function loadDashboard() {
+  if (isRefreshing) return;
+  isRefreshing = true;
+  try {
+    const status = await apiGet('/api/v1/status');
+    statusData = status;
+    updateStatusBar(status);
+    setConnectionStatus(true);
+    try {
+      const jobs = await apiGet('/api/v1/jobs');
+      jobsData = jobs;
+      renderJobs(jobs);
+    } catch (e) {
+      document.getElementById('jobsSection').style.display = 'none';
+    }
+    lastRefresh = new Date();
+    document.getElementById('lastRefresh').textContent = 'Last updated: ' + lastRefresh.toLocaleTimeString();
+  } catch (err) {
+    setConnectionStatus(false);
+  }
+  isRefreshing = false;
 }
 
-// ===== Formatting =====
-function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+function setConnectionStatus(connected) {
+  const dot = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  const banner = document.getElementById('errorBanner');
+  if (connected) {
+    dot.className = 'status-dot connected';
+    text.textContent = 'Connected';
+    banner.classList.remove('visible');
+  } else {
+    dot.className = 'status-dot disconnected';
+    text.textContent = 'Disconnected';
+    banner.classList.add('visible');
+  }
 }
 
-function formatDuration(ns) {
-  if (!ns) return '—';
-  const totalSec = Math.floor(ns / 1e9);
-  if (totalSec < 60) return totalSec + 's';
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  if (min < 60) return min + 'm ' + sec + 's';
-  const hr = Math.floor(min / 60);
-  const remMin = min % 60;
-  return hr + 'h ' + remMin + 'm';
+function updateStatusBar(status) {
+  if (!status) return;
+  document.getElementById('schedulerStatus').textContent = status.schedulerRunning ? 'Running' : 'Stopped';
+  document.getElementById('schedulerStatus').className = 'value ' + (status.schedulerRunning ? 'running' : 'stopped');
+  document.getElementById('scheduledCount').textContent = status.scheduledJobs || 0;
+  document.getElementById('apiPort').textContent = status.apiPort || '—';
+  const uptime = status.uptime || '';
+  document.getElementById('daemonUptime').textContent = uptime ? uptime : '—';
+  document.getElementById('btnStartScheduler').style.display = status.schedulerRunning ? 'none' : '';
+  document.getElementById('btnStopScheduler').style.display = status.schedulerRunning ? '' : 'none';
 }
 
 function formatTime(iso) {
@@ -333,376 +369,186 @@ function formatStatus(status) {
 function formatCron(expr) {
   if (!expr) return '—';
   const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return escapeHtml(expr);
+  if (parts.length !== 5) escapeHtml(expr);
   const [min, hour, dom, mon, dow] = parts;
   let desc = '';
-  if (min === '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
-    desc = 'Every minute';
-  } else if (min === '0' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
-    desc = 'Every hour';
-  } else if (min === '0' && hour === '*') {
-    desc = `Every hour at :00`;
-  } else if (min === '0' && dom === '*' && mon === '*' && dow === '*') {
-    desc = descHour(hour);
-  } else if (min === '0' && hour === '9' && dom === '*' && mon === '*' && dow === '1-5') {
-    desc = 'Weekdays at 9:00 AM';
-  } else if (min === '0' && hour === '9' && dom === '*' && mon === '*' && (dow === '1,2,3,4,5' || dow === '1-5' || dow === 'MON-FRI')) {
-    desc = 'Weekdays at 9:00 AM';
-  } else if (min === '0' && hour === '0' && dom === '*' && mon === '*' && dow === '*') {
-    desc = 'Midnight (daily)';
-  } else if (min === '0' && hour === '12' && dom === '*' && mon === '*' && dow === '*') {
-    desc = 'Noon (daily)';
-  } else if (min === '0' && hour === '0' && dom === '1' && mon === '*' && dow === '*') {
-    desc = 'First day of every month';
-  } else if (min !== '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
-    desc = `Every hour at minute ${min}`;
-  } else if (min.startsWith('*/')) {
-    const interval = min.substring(2);
-    desc = `Every ${interval} minute(s)`;
-    if (hour !== '*') desc += `, hour ${hour}`;
-  } else if (hour.startsWith('*/')) {
-    const interval = hour.substring(2);
-    desc = `Every ${interval} hour(s)` + (min !== '0' ? ` at :${min}` : '');
-  } else if (hour.includes(',')) {
-    const hours = hour.split(',').map(h => {
-      const hnum = parseInt(h);
-      if (hnum === 0) return 'midnight';
-      if (hnum === 12) return 'noon';
-      return hnum > 12 ? `${hnum-12} PM` : `${hnum} AM`;
+  if (min === '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') desc = 'Every minute';
+  else if (min === '0' && hour === '*' && dom === '*' && mon === '*' && dow === '*') desc = 'Every hour';
+  else if (min === '0' && dom === '*' && mon === '*' && dow === '*') desc = descHour(hour);
+  else if (min.startsWith('*/')) desc = 'Every ' + min.substring(2) + ' minute(s)';
+  else if (hour.startsWith('*/')) desc = 'Every ' + hour.substring(2) + ' hours';
+  else if (hour.includes(',')) {
+    desc = 'At ' + hour.split(',').map(function(h) {
+      var hn = parseInt(h); return hn === 0 ? 'midnight' : hn === 12 ? 'noon' : hn > 12 ? (hn-12) + ' PM' : hn + ' AM';
     }).join(', ');
-    desc = `At ${hours}` + (min !== '0' ? ` minute ${min}` : '');
-  } else {
-    desc = descHour(hour) + (min !== '0' ? ` at minute ${min}` : '');
-  }
-  if (mon !== '*') desc += `, month: ${mon}`;
-  if (dow !== '*' && !(dow === '1-5' || dow === 'MON-FRI' || dow === '1,2,3,4,5')) {
-    desc += `, day: ${dow}`;
-  } else if (dow === '0' || dow === '7' || dow === 'SUN') {
-    desc += ' (Sundays)';
-  } else if (dow === '6' || dow === 'SAT') {
-    desc += ' (Saturdays)';
-  }
-  return `<span title="${escapeHtml(expr)}">${escapeHtml(desc)}</span>`;
+    if (min !== '0') desc += ' minute ' + min;
+  } else desc = descHour(hour) + (min !== '0' ? ' at minute ' + min : '');
+  return '<span title="' + escapeHtml(expr) + '">' + escapeHtml(desc) + '</span>';
 }
 
 function descHour(hour) {
-  if (hour === '*') return 'Every hour';
-  const h = parseInt(hour);
-  if (h === 0) return 'Midnight';
-  if (h === 12) return 'Noon';
-  return h > 12 ? `Daily at ${h-12}:00 PM` : `Daily at ${h}:00 AM`;
+  var h = parseInt(hour); if (h === 0) return 'Midnight'; if (h === 12) return 'Noon';
+  return h > 12 ? 'Daily at ' + (h-12) + ':00 PM' : 'Daily at ' + h + ':00 AM';
 }
 
-// ===== Toast =====
 function showToast(message, type) {
-  const container = document.getElementById('toastContainer');
-  const toast = document.createElement('div');
+  var container = document.getElementById('toastContainer');
+  if (!container) { container = document.createElement('div'); container.className = 'toast-container'; container.id = 'toastContainer'; document.body.appendChild(container); }
+  var toast = document.createElement('div');
   toast.className = 'toast toast-' + type;
   toast.textContent = message;
   container.appendChild(toast);
-  setTimeout(() => { toast.remove(); }, 3000);
+  setTimeout(function() { toast.remove(); }, 3000);
 }
 
-// ===== Error Banner =====
-function showError(msg) {
-  document.getElementById('errorBanner').classList.add('visible');
-  document.getElementById('errorText').textContent = msg;
+function escapeHtml(str) {
+  if (!str) return '';
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
-function hideError() {
-  document.getElementById('errorBanner').classList.remove('visible');
-}
-
-// ===== Main Load =====
-async function loadDashboard() {
-  if (isRefreshing) return;
-  isRefreshing = true;
-  try {
-    await Promise.all([loadStatus(), loadJobs()]);
-    hideError();
-    document.getElementById('connDot').className = 'status-dot connected';
-    document.getElementById('connText').textContent = 'Connected';
-  } catch (err) {
-    showError('Connection to daemon lost — retrying...');
-    document.getElementById('connDot').className = 'status-dot disconnected';
-    document.getElementById('connText').textContent = 'Offline';
-  }
-  isRefreshing = false;
-  lastRefresh = new Date();
-  document.getElementById('lastRefresh').textContent = 'Last updated: ' + lastRefresh.toLocaleTimeString();
-}
-
-async function loadStatus() {
-  const status = await apiGet('/api/v1/status');
-  statusData = status;
-
-  const schedEl = document.getElementById('schedulerStatus');
-  schedEl.textContent = status.schedulerRunning ? 'Running' : 'Stopped';
-  schedEl.className = 'value ' + (status.schedulerRunning ? 'running' : 'stopped');
-
-  document.getElementById('scheduledCount').textContent = status.scheduledJobs;
-  document.getElementById('apiPort').textContent = status.apiPort;
-  document.getElementById('daemonUptime').textContent = status.uptime || '—';
-
-  document.getElementById('btnStartScheduler').style.display = status.schedulerRunning ? 'none' : '';
-  document.getElementById('btnStopScheduler').style.display = status.schedulerRunning ? '' : 'none';
-}
-
-async function loadJobs() {
-  const data = await apiGet('/api/v1/jobs');
-  jobsData = data.jobs || [];
-
-  document.getElementById('loadingIndicator').style.display = 'none';
-  document.getElementById('jobsSection').style.display = '';
-
-  const countEl = document.getElementById('jobCount');
-  countEl.textContent = jobsData.length + ' job' + (jobsData.length !== 1 ? 's' : '');
-
-  const container = document.getElementById('jobsContainer');
-  container.innerHTML = '';
-
-  if (jobsData.length === 0) {
-    container.innerHTML = '<div class="empty-state"><h3>No backup jobs configured</h3><p>Use the CLI to add jobs: <code>ds3backup job add</code></p></div>';
+function renderJobs(jobs) {
+  if (!jobs || jobs.length === 0) {
+    document.getElementById('jobsSection').style.display = '';
+    document.getElementById('jobsContainer').innerHTML = '<div class="empty-state"><h3>No backup jobs</h3><p>Click "+ Add Job" to create your first backup job.</p></div>';
     return;
   }
-
-  // Sort jobs: enabled first, then by name
-  jobsData.sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-    return (a.name || '').localeCompare(b.name || '');
-  });
-
-  for (const job of jobsData) {
-    const card = await createJobCard(job);
-    container.appendChild(card);
+  document.getElementById('jobsSection').style.display = '';
+  document.getElementById('jobCount').textContent = jobs.length + ' job(s)';
+  var container = document.getElementById('jobsContainer');
+  container.innerHTML = '';
+  for (var i = 0; i < jobs.length; i++) {
+    container.appendChild(createJobCard(jobs[i]));
   }
 }
 
-async function createJobCard(job) {
-  const card = document.createElement('div');
+function createJobCard(job) {
+  var card = document.createElement('div');
   card.className = 'job-card';
-  card.id = 'job-' + job.id;
-
-  const lastRunStatus = job.lastRun
-    ? await getJobLastRunStatus(job.id)
-    : 'never';
-
-  card.innerHTML = `
-    <div class="job-card-header">
-      <div>
-        <div class="job-name">${escapeHtml(job.name || job.id)}</div>
-        <div class="job-id">${escapeHtml(job.id)}</div>
-      </div>
-      <div>${formatStatus(job.enabled ? lastRunStatus : 'disabled')}</div>
-    </div>
-    <div class="job-card-body">
-      <div class="job-info-row">
-        <span class="info-label">Source</span>
-        <span class="info-value">${escapeHtml(job.sourcePath || '—')}</span>
-      </div>
-      <div class="job-info-row">
-        <span class="info-label">Schedule</span>
-        <span class="info-value">${job.scheduleEnabled ? formatCron(job.cronExpr) : 'Manual only'}</span>
-      </div>
-      <div class="job-info-row">
-        <span class="info-label">Next Run</span>
-        <span class="info-value">${formatTime(job.nextRun)}</span>
-      </div>
-      <div class="job-info-row">
-        <span class="info-label">Retention</span>
-        <span class="info-value">${job.retentionDays || '—'} days</span>
-      </div>
-      ${job.lastError ? `<div class="job-info-row"><span class="info-label" style="color:#ff8a80;">Last Error</span><span class="info-value" style="color:#ff8a80;">${escapeHtml(job.lastError)}</span></div>` : ''}
-      <div class="job-actions">
-        <button class="btn btn-primary btn-sm" onclick="triggerBackup('${job.id}')" id="runBtn-${job.id}">▶ Run Backup</button>
-      </div>
-    </div>
-    <button class="history-toggle" onclick="toggleHistory('${job.id}')">
-      <span class="arrow" id="arrow-${job.id}">▶</span> Show History
-    </button>
-    <div class="history-content" id="history-${job.id}">
-      <div class="loading" id="historyLoading-${job.id}">
-        <div class="spinner"></div>
-        <span>Loading history...</span>
-      </div>
-    </div>
-  `;
-
+  var lastRunStatus = '';
+  card.innerHTML =
+    '<div class="job-card-header"><div><div class="job-name">' + escapeHtml(job.name || job.id) + '</div><div class="job-id">' + escapeHtml(job.id) + '</div></div>' +
+    '<div>' + formatStatus(lastRunStatus) + '</div></div>' +
+    '<div class="job-card-body">' +
+    '<div class="job-info-row"><span class="info-label">Source</span><span class="info-value">' + escapeHtml(job.sourcePath || '—') + '</span></div>' +
+    '<div class="job-info-row"><span class="info-label">Schedule</span><span class="info-value">' + (job.scheduleEnabled ? formatCron(job.cronExpr) : 'Manual only') + '</span></div>' +
+    '<div class="job-info-row"><span class="info-label">Next Run</span><span class="info-value">' + formatTime(job.nextRun) + '</span></div>' +
+    '<div class="job-info-row"><span class="info-label">Retention</span><span class="info-value">' + (job.retentionDays || '—') + ' days</span></div>' +
+    (job.lastError ? '<div class="job-info-row"><span class="info-label" style="color:#ff8a80;">Last Error</span><span class="info-value" style="color:#ff8a80;">' + escapeHtml(job.lastError) + '</span></div>' : '') +
+    '<div class="job-actions"><button class="btn btn-primary btn-sm" onclick="triggerBackup(\'' + job.id + '\')" id="runBtn-' + job.id + '">▶ Run Backup</button></div></div>' +
+    '<button class="history-toggle" onclick="toggleHistory(\'' + job.id + '\')"><span class="arrow" id="arrow-' + job.id + '">▶</span> Show History</button>' +
+    '<div class="history-content" id="history-' + job.id + '"><div class="loading" id="historyLoading-' + job.id + '"><div class="spinner"></div><span>Loading history...</span></div></div>';
   return card;
 }
 
-async function getJobLastRunStatus(jobId) {
-  try {
-    if (historyCache[jobId] && historyCache[jobId].length > 0) {
-      return historyCache[jobId][0].status;
-    }
-    const data = await apiGet('/api/v1/jobs/' + jobId + '/history');
-    historyCache[jobId] = data.runs || [];
-    if (historyCache[jobId].length > 0) {
-      return historyCache[jobId][0].status;
-    }
-  } catch (e) {
-    // ignore
-  }
-  return 'never';
-}
-
 async function toggleHistory(jobId) {
-  const content = document.getElementById('history-' + jobId);
-  const arrow = document.getElementById('arrow-' + jobId);
-  const isOpen = content.classList.contains('open');
-
-  if (isOpen) {
-    content.classList.remove('open');
-    arrow.className = 'arrow';
-    return;
-  }
-
+  var content = document.getElementById('history-' + jobId);
+  var arrow = document.getElementById('arrow-' + jobId);
+  var isOpen = content.classList.contains('open');
+  if (isOpen) { content.classList.remove('open'); arrow.className = 'arrow'; return; }
   content.classList.add('open');
   arrow.className = 'arrow open';
-
-  // Load history if not already loaded
   if (content.querySelector('.loading')) {
     try {
-      let runs = historyCache[jobId];
-      if (!runs) {
-        const data = await apiGet('/api/v1/jobs/' + jobId + '/history');
-        runs = data.runs || [];
-        historyCache[jobId] = runs;
-      }
+      var runs = historyCache[jobId];
+      if (!runs) { var data = await apiGet('/api/v1/jobs/' + jobId + '/history'); runs = data.runs || []; historyCache[jobId] = runs; }
       renderHistoryTable(jobId, runs);
-    } catch (err) {
-      content.querySelector('.loading').innerHTML = '<div class="history-empty">Failed to load history</div>';
-    }
+    } catch (err) { content.querySelector('.loading').innerHTML = '<div class="history-empty">Failed to load history</div>'; }
   }
 }
 
 function renderHistoryTable(jobId, runs) {
-  const content = document.getElementById('history-' + jobId);
-  if (!runs || runs.length === 0) {
-    content.innerHTML = '<div class="history-empty">No backup runs yet.</div>';
-    return;
+  var content = document.getElementById('history-' + jobId);
+  if (!runs || runs.length === 0) { content.innerHTML = '<div class="history-empty">No backup runs yet.</div>'; return; }
+  var html = '<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Date/Time</th><th>Status</th><th>Added</th><th>Changed</th><th>Size</th><th>Duration</th>';
+  html += '</tr></thead><tbody>';
+  for (var i = 0; i < runs.length; i++) {
+    var r = runs[i];
+    html += '<tr><td>' + formatTime(r.runTime || r.startTime) + '</td><td>' + formatStatus(r.status) + '</td><td>' + (r.filesAdded || 0) + '</td><td>' + (r.filesChanged || 0) + '</td><td>' + formatBytes(r.bytesUploaded || 0) + '</td><td>' + formatDuration(r.duration || 0) + '</td></tr>';
   }
-
-  let html = '<div class="history-table-wrap"><table class="history-table"><thead><tr>' +
-    '<th>Date/Time</th><th>Status</th><th>Added</th><th>Changed</th><th>Size</th><th>Duration</th>' +
-    (runs.some(r => r.error) ? '<th>Error</th>' : '') +
-    '</tr></thead><tbody>';
-
-  for (const run of runs) {
-    html += '<tr>' +
-      '<td>' + formatTime(run.runTime || run.startTime) + '</td>' +
-      '<td>' + formatStatus(run.status) + '</td>' +
-      '<td>' + (run.filesAdded || 0) + '</td>' +
-      '<td>' + (run.filesChanged || 0) + '</td>' +
-      '<td>' + formatBytes(run.bytesUploaded) + '</td>' +
-      '<td>' + formatDuration(run.duration) + '</td>' +
-      (run.error ? '<td class="error-cell" title="' + escapeHtml(run.error) + '">' + escapeHtml(run.error) + '</td>' : '') +
-      '</tr>';
-  }
-
   html += '</tbody></table></div>';
   content.innerHTML = html;
 }
 
-// ===== Actions =====
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0';
+  var units = ['B', 'KB', 'MB', 'GB'];
+  var i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+}
+
+function formatDuration(d) {
+  if (!d) return '—';
+  if (typeof d === 'string') { var n = parseInt(d); if (!isNaN(n)) d = n; }
+  if (d < 60) return Math.round(d) + 's';
+  if (d < 3600) return Math.floor(d/60) + 'm ' + Math.round(d%60) + 's';
+  return Math.floor(d/3600) + 'h ' + Math.floor((d%3600)/60) + 'm';
+}
+
 async function triggerBackup(jobId) {
-  const btn = document.getElementById('runBtn-' + jobId);
-  btn.disabled = true;
-  btn.textContent = '⏳ Triggering...';
+  var btn = document.getElementById('runBtn-' + jobId);
+  if (btn) btn.disabled = true;
   try {
-    const resp = await apiPost('/api/v1/backup/run/' + jobId);
-    showToast('Backup triggered for ' + jobId, 'success');
-    // Re-fetch history after a delay
-    setTimeout(async () => {
-      try {
-        const data = await apiGet('/api/v1/jobs/' + jobId + '/history');
-        historyCache[jobId] = data.runs || [];
-        if (document.getElementById('history-' + jobId).classList.contains('open')) {
-          renderHistoryTable(jobId, historyCache[jobId]);
-        }
-        // Re-render just the status badge
-        if (historyCache[jobId].length > 0) {
-          const header = document.querySelector('#job-' + jobId + ' .job-card-header > div:last-child');
-          if (header) header.innerHTML = formatStatus(historyCache[jobId][0].status);
-        }
-      } catch (e) { /* ignore */ }
-    }, 2000);
-  } catch (err) {
-    showToast('Failed to trigger backup: ' + err.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '▶ Run Backup';
-  }
+    var resp = await fetch('/api/v1/backup/run/' + jobId, { method: 'POST' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showToast('Backup triggered for job ' + jobId, 'success');
+  } catch (err) { showToast('Failed: ' + err.message, 'error'); }
+  if (btn) btn.disabled = false;
 }
 
 async function toggleScheduler() {
-  const isRunning = statusData && statusData.schedulerRunning;
+  var running = statusData && statusData.schedulerRunning;
   try {
-    if (isRunning) {
-      await apiPost('/api/v1/stop');
-      showToast('Scheduler stopped', 'info');
-    } else {
-      await apiPost('/api/v1/start');
-      showToast('Scheduler started', 'success');
-    }
-    await loadStatus();
-  } catch (err) {
-    showToast('Failed to toggle scheduler: ' + err.message, 'error');
-  }
+    var resp = await fetch(running ? '/api/v1/stop' : '/api/v1/start', { method: 'POST' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showToast(running ? 'Scheduler stopped' : 'Scheduler started', running ? 'info' : 'success');
+    await loadDashboard();
+  } catch (err) { showToast('Failed: ' + err.message, 'error'); }
 }
 
 function refreshNow() {
   loadDashboard();
 }
 
-// ===== Create Job =====
-async function createJob() {
-  const name = document.getElementById('newJobName').value.trim();
-  const path = document.getElementById('newJobPath').value.trim();
-  const password = document.getElementById('newJobPassword').value;
-  const cron = document.getElementById('newJobCron').value.trim();
+async function loadLogs() {
+  document.getElementById('logsModal').classList.add('open');
+  document.getElementById('logsContent').textContent = 'Loading...';
+  try {
+    var resp = await fetch('/api/v1/logs');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var text = await resp.text();
+    document.getElementById('logsContent').textContent = text || '(no logs)';
+  } catch (err) {
+    document.getElementById('logsContent').textContent = 'Failed to load logs: ' + err.message + '\n\n(Try running from terminal: tail -100 ~/.ds3backup/ds3backup.log)';
+  }
+}
 
+async function createJob() {
+  var name = document.getElementById('newJobName').value.trim();
+  var path = document.getElementById('newJobPath').value.trim();
+  var password = document.getElementById('newJobPassword').value;
+  var cron = document.getElementById('newJobCron').value.trim();
   if (!name) { showToast('Job name is required', 'error'); return; }
   if (!path) { showToast('Source directory is required', 'error'); return; }
   if (!password) { showToast('Encryption password is required', 'error'); return; }
-
   document.getElementById('addJobModal').classList.remove('open');
   try {
-    const resp = await fetch('/api/v1/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, sourcePath: path, password, cronExpr: cron })
-    });
-    if (!resp.ok) {
-      const err = await resp.text();
-      throw new Error(err);
-    }
-    showToast(`Job "${name}" created successfully!`, 'success');
+    var resp = await fetch('/api/v1/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, sourcePath: path, password: password, cronExpr: cron }) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showToast('Job "' + name + '" created!', 'success');
     document.getElementById('newJobName').value = '';
     document.getElementById('newJobPath').value = '';
     document.getElementById('newJobPassword').value = '';
     document.getElementById('newJobCron').value = '';
     await loadDashboard();
-  } catch (err) {
-    showToast('Failed to create job: ' + err.message, 'error');
-  }
+  } catch (err) { showToast('Failed: ' + err.message, 'error'); }
 }
 
-// ===== Helpers =====
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-// ===== Initialization =====
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('refreshIndicator').textContent = 'Auto-refresh every ' + (REFRESH_INTERVAL / 1000) + 's';
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, REFRESH_INTERVAL);
 });
 </script>
-</body>
 </html>
