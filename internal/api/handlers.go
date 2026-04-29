@@ -3,7 +3,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
 // handleStatus handles GET /api/v1/status.
@@ -80,5 +83,49 @@ func (s *APIServer) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 		JobID:     jobID,
 		Triggered: true,
 		Message:   fmt.Sprintf("backup job %s started", jobID),
+	})
+}
+
+// handleGetJobHistory handles GET /api/v1/jobs/{id}/history.
+func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+
+	// Validate the job exists
+	job := s.jobManager.GetJob(jobID)
+	if job == nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+		return
+	}
+
+	// Get limit from query param (default 20)
+	limit := 20
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	// Use history provider if available
+	if s.historyProvider == nil {
+		s.writeJSON(w, http.StatusOK, HistoryResponse{
+			JobID: jobID,
+			Runs:  []*models.BackupRun{},
+		})
+		return
+	}
+
+	runs, err := s.historyProvider.GetJobHistory(jobID, limit)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get history: %s", err.Error()))
+		return
+	}
+
+	if runs == nil {
+		runs = []*models.BackupRun{}
+	}
+
+	s.writeJSON(w, http.StatusOK, HistoryResponse{
+		JobID: jobID,
+		Runs:  runs,
 	})
 }

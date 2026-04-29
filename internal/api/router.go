@@ -20,6 +20,9 @@ import (
 func (s *APIServer) setupRouter() http.Handler {
 	mux := http.NewServeMux()
 
+	// Dashboard — serves the single-page dashboard HTML at root
+	mux.Handle("GET /", s.createDashboardHandler())
+
 	// Daemon endpoints
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	mux.HandleFunc("POST /api/v1/start", s.handleStart)
@@ -28,6 +31,7 @@ func (s *APIServer) setupRouter() http.Handler {
 	// Job endpoints
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
+	mux.HandleFunc("GET /api/v1/jobs/{id}/history", s.handleGetJobHistory)
 
 	// Backup endpoints
 	mux.HandleFunc("POST /api/v1/backup/run/{id}", s.handleRunBackup)
