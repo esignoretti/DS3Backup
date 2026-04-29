@@ -69,7 +69,12 @@ Plans:
   1. User can view backup status and history in a graphical window
   2. User can configure jobs and trigger backups from the UI
   3. Desktop notifications on backup completion/failure
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — API enhancements: history endpoint + dashboard static serving + embed infrastructure
+- [ ] 03-02-PLAN.md — Web dashboard SPA: single-file HTML+CSS+JS dashboard served at GET /
+- [ ] 03-03-PLAN.md — Tray wiring + notifications: open dashboard in browser, per-job backup items, notification integration
 
 ### Phase 4: Enterprise & Polish (Planned)
 **Goal**: Multi-target storage, advanced monitoring, performance optimization, and security hardening
@@ -90,5 +95,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
-| 3. Desktop UI | TBD | 📋 Planned | - |
+| 3. Desktop UI | 3 plans | 📋 Planned | - |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
