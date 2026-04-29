@@ -3,12 +3,18 @@ package index
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/esignoretti/ds3backup/pkg/models"
+)
+
+const (
+	maxRetries = 3
+	retryDelay = 2 * time.Second
 )
 
 // IndexDB wraps BadgerDB for file indexing
@@ -18,18 +24,34 @@ type IndexDB struct {
 
 // OpenIndexDB opens or creates a BadgerDB index
 func OpenIndexDB(path string) (*IndexDB, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		db, err := openBadger(path)
+		if err == nil {
+			return &IndexDB{db: db}, nil
+		}
+		lastErr = err
+		if i < maxRetries-1 {
+			log.Printf("BadgerDB locked at %s, retrying in %s (attempt %d/%d)", path, retryDelay, i+1, maxRetries-1)
+			time.Sleep(retryDelay)
+		}
+	}
+	return nil, fmt.Errorf("failed to open BadgerDB after %d attempts: %w", maxRetries, lastErr)
+}
+
+func openBadger(path string) (*badger.DB, error) {
 	opts := badger.DefaultOptions(path).
-		WithCompression(2). // Snappy compression
+		WithCompression(2).
 		WithNumCompactors(2).
-		WithMemTableSize(64 << 20). // 64 MB
-		WithLogger(nil)             // Disable logging
+		WithMemTableSize(64 << 20).
+		WithLogger(nil)
 
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open BadgerDB: %w", err)
 	}
 
-	return &IndexDB{db: db}, nil
+	return db, nil
 }
 
 // Close closes the database
