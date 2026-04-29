@@ -97,9 +97,9 @@ With --rebuild flag:
 		// Check Object Lock support
 		objectLockSupported, err := client.CheckObjectLockSupport()
 		if err != nil {
-			log.Printf("Warning: Could not check Object Lock support: %v", err)
+   if IsVerbose() { log.Printf("Warning: Could not check Object Lock support: %v", err) }
 		} else if !objectLockSupported && objectLock != "NONE" {
-			log.Printf("Warning: Bucket does not support Object Lock, but object lock mode is set to %s", objectLock)
+   if IsVerbose() { log.Printf("Warning: Bucket does not support Object Lock, but object lock mode is set to %s", objectLock) }
 		} else if objectLockSupported {
 			fmt.Println("✓ Object Lock supported")
 		}
@@ -188,12 +188,7 @@ func init() {
 	initCmd.Flags().IntVar(&retentionDays, "retention-days", 30, "Default retention period in days")
 	initCmd.Flags().StringVar(&masterPassword, "master-password", "", "Master password for encrypting job configs")
 	initCmd.Flags().BoolVar(&rebuild, "rebuild", false, "Rebuild configuration from S3 backup metadata")
-	initCmd.Flags().StringVar(&jobPassword, "job-password", "", "Job password for all recovered jobs (optional, skips interactive prompt)")
 
-	initCmd.MarkFlagRequired("endpoint")
-	initCmd.MarkFlagRequired("bucket")
-	initCmd.MarkFlagRequired("access-key")
-	initCmd.MarkFlagRequired("secret-key")
 }
 
 // runRebuild executes the rebuild process
@@ -201,13 +196,32 @@ func runRebuild(cmd *cobra.Command) error {
 	fmt.Println("Rebuilding configuration from S3...")
 	fmt.Println()
 
-	// Validate parameters
+	// Try to load S3 credentials from existing config file first
 	if endpoint == "" || bucket == "" || accessKey == "" || secretKey == "" {
-		return fmt.Errorf("missing required parameters:\n  --endpoint, --bucket, --access-key, --secret-key are required")
+		if cfgFile != "" {
+			fmt.Printf("Loading S3 credentials from config: %s\n", cfgFile)
+			existingCfg, err := config.LoadConfig(cfgFile)
+			if err == nil && existingCfg.S3.Endpoint != "" {
+				endpoint = existingCfg.S3.Endpoint
+				bucket = existingCfg.S3.Bucket
+				accessKey = existingCfg.S3.AccessKey
+				secretKey = existingCfg.S3.SecretKey
+				if existingCfg.S3.Region != "" {
+					region = existingCfg.S3.Region
+				}
+				fmt.Println("✓ S3 credentials loaded from config")
+				fmt.Println()
+			}
+		}
 	}
 
-	// Get master password
-	if masterPassword == "" {
+	// Validate parameters
+	if endpoint == "" || bucket == "" || accessKey == "" || secretKey == "" {
+		return fmt.Errorf("missing required parameters:\n  --endpoint, --bucket, --access-key, --secret-key are required\n  (or provide --config with existing config file)")
+	}
+
+	// Get master password (during rebuild, default to empty if not provided)
+	if masterPassword == "" && !rebuild {
 		fmt.Print("Enter master password (leave empty if not set): ")
 		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 		if err != nil {
@@ -236,7 +250,7 @@ func runRebuild(cmd *cobra.Command) error {
 
 	// Run rebuild
 	ctx := cmd.Context()
-	if err := recovery.RunRebuild(ctx, client, masterPassword, jobPassword); err != nil {
+	if err := recovery.RunRebuild(ctx, client, masterPassword); err != nil {
 		return fmt.Errorf("rebuild failed: %w", err)
 	}
 

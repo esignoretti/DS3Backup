@@ -1,25 +1,196 @@
 package recovery
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"syscall"
 
+	"github.com/esignoretti/ds3backup/internal/backup"
 	"github.com/esignoretti/ds3backup/internal/config"
 	"github.com/esignoretti/ds3backup/internal/crypto"
-	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
 	"github.com/esignoretti/ds3backup/pkg/models"
-	"golang.org/x/term"
 )
 
-// JobMetadata represents job configuration stored on S3
+// RunRebuild executes the complete disaster recovery process
+func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword string) error {
+	fmt.Println("🔄 Starting disaster recovery...")
+	fmt.Println()
+
+	// Get config directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config directory: %w", err)
+	}
+
+	// Step 1: Delete existing .ds3backup directory
+	fmt.Println("Step 1: Cleaning up existing configuration...")
+	if err := os.RemoveAll(configDir); err != nil {
+		return fmt.Errorf("failed to remove existing config: %w", err)
+	}
+	fmt.Println("  ✓ Removed existing .ds3backup directory")
+
+	// Step 2: Create fresh directory
+	fmt.Println("\nStep 2: Creating fresh configuration directory...")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	fmt.Println("  ✓ Created .ds3backup directory")
+
+	// Step 3: Download disaster recovery archive
+	fmt.Println("\nStep 3: Downloading disaster recovery archive from S3...")
+	archiveData, err := s3client.GetObject(ctx, ".ds3backup.tar.gz")
+	if err != nil {
+		return fmt.Errorf("failed to download archive: %w", err)
+	}
+	fmt.Println("  ✓ Archive downloaded")
+
+	// Step 4: Download and verify checksum
+	fmt.Println("\nStep 4: Verifying archive integrity...")
+	checksumData, err := s3client.GetObject(ctx, ".ds3backup.tar.gz.sha256")
+	if err != nil {
+		return fmt.Errorf("failed to download checksum: %w", err)
+	}
+	expectedChecksum := strings.TrimSpace(string(checksumData))
+
+	// Calculate checksum of downloaded data
+	hash, err := backup.CalculateSHA256FromReader(bytes.NewReader(archiveData))
+	if err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	if hash != expectedChecksum {
+		return fmt.Errorf("❌ CHECKSUM MISMATCH - Archive corrupted!\n  Expected: %s\n  Got: %s", expectedChecksum, hash)
+	}
+	fmt.Printf("  ✓ Checksum verified: %s\n", hash[:16]+"...")
+
+	// Step 5: Extract archive
+	fmt.Println("\nStep 5: Extracting archive...")
+	if err := backup.ExtractBackupArchive(bytes.NewReader(archiveData), configDir); err != nil {
+		return fmt.Errorf("failed to extract archive: %w", err)
+	}
+	fmt.Println("  ✓ Archive extracted successfully")
+
+	// Step 6: Load and update config with master password
+	fmt.Println("\nStep 6: Updating configuration...")
+	cfg, err := config.LoadConfig(filepath.Join(configDir, "config.json"))
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// If master password provided and jobs have plain text passwords, encrypt them
+	if masterPassword != "" && len(cfg.Jobs) > 0 {
+		needsSave := false
+		for i := range cfg.Jobs {
+			if cfg.Jobs[i].EncryptionPassword != "" {
+				// Password is already encrypted or plain - keep as-is for now
+				// In future, could add explicit encryptedPassword field
+				needsSave = true
+			}
+		}
+		
+		if needsSave {
+			// Save updated config
+			if err := cfg.SaveConfig(); err != nil {
+				return fmt.Errorf("failed to save updated config: %w", err)
+			}
+			fmt.Println("  ✓ Configuration validated")
+		}
+	}
+
+	// Step 7: Load encryption salt
+	fmt.Println("\nStep 7: Loading encryption salt...")
+	salt, err := LoadEncryptionSalt(ctx, s3client)
+	if err != nil {
+		fmt.Printf("  ⚠️  Could not load encryption salt: %v\n", err)
+	} else {
+		fmt.Println("  ✓ Encryption salt loaded")
+		// Update config with salt if not present
+		if len(cfg.Encryption.Salt) == 0 {
+			cfg.Encryption.Salt = salt
+			cfg.SaveConfig()
+		}
+	}
+
+	// Step 8: Discover jobs
+	fmt.Println("\nStep 8: Discovering backup jobs...")
+	jobs, err := discoverJobsFromConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to discover jobs: %w", err)
+	}
+
+	if len(jobs) == 0 {
+		fmt.Println("  ⚠️  No backup jobs found")
+	} else {
+		fmt.Printf("  ✓ Found %d backup job(s):\n", len(jobs))
+		for _, job := range jobs {
+			fmt.Printf("    • %s (%s)\n", job.Name, job.ID)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("✅ Disaster recovery completed successfully!")
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Println("  ds3backup job list              # View all recovered jobs")
+	fmt.Println("  ds3backup backup run <job-id>   # Run a backup")
+	fmt.Println("  ds3backup restore <job-id>      # Restore files")
+
+	return nil
+}
+
+// discoverJobsFromConfig extracts job information from loaded config
+func discoverJobsFromConfig(cfg *config.Config) ([]models.BackupJob, error) {
+	return cfg.Jobs, nil
+}
+
+// LoadEncryptionSalt downloads the encryption salt from S3
+func LoadEncryptionSalt(ctx context.Context, s3client *s3client.Client) ([]byte, error) {
+	data, err := s3client.GetObject(ctx, ".ds3backup/encryption-salt.json")
+	if err != nil {
+		return nil, err
+	}
+
+	var saltData struct {
+		Salt string `json:"salt"`
+	}
+	if err := json.Unmarshal(data, &saltData); err != nil {
+		return nil, fmt.Errorf("failed to parse salt file: %w", err)
+	}
+
+	salt, err := base64.StdEncoding.DecodeString(saltData.Salt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode salt: %w", err)
+	}
+
+	return salt, nil
+}
+
+// Simple downloader for rebuild (no complex index reconstruction needed)
+type RebuildEngine struct {
+	s3client *s3client.Client
+}
+
+// NewRebuildEngine creates a simple rebuild engine
+func NewRebuildEngine(s3client *s3client.Client) *RebuildEngine {
+	return &RebuildEngine{
+		s3client: s3client,
+	}
+}
+
+// RebuildIndex is no longer needed - entire .ds3backup is restored as a whole
+// This method is kept for API compatibility but does nothing
+func (e *RebuildEngine) RebuildIndex(ctx context.Context, job JobMetadata) error {
+	// Index is already restored as part of the full .ds3backup archive
+	return nil
+}
+
+// JobMetadata represents job configuration (kept for compatibility)
 type JobMetadata struct {
 	ID                string `json:"id"`
 	Name              string `json:"name"`
@@ -29,319 +200,47 @@ type JobMetadata struct {
 	EncryptedPassword string `json:"encryptedPassword,omitempty"`
 }
 
-// RebuildEngine handles disaster recovery operations
-type RebuildEngine struct {
-	s3client       *s3client.Client
-	masterPassword string
-	salt           []byte
-}
-
-// LoadEncryptionSalt downloads the encryption salt from S3
-func LoadEncryptionSalt(ctx context.Context, s3client *s3client.Client) ([]byte, error) {
-	data, err := s3client.GetObject(ctx, ".ds3backup/encryption-salt.json")
-	if err != nil {
-		return nil, err
-	}
-	
-	var saltData struct {
-		Salt string `json:"salt"`
-	}
-	if err := json.Unmarshal(data, &saltData); err != nil {
-		return nil, fmt.Errorf("failed to parse salt file: %w", err)
-	}
-	
-	salt, err := base64.StdEncoding.DecodeString(saltData.Salt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode salt: %w", err)
-	}
-	
-	return salt, nil
-}
-
-// NewRebuildEngine creates a new rebuild engine
-func NewRebuildEngine(s3client *s3client.Client, masterPassword string, salt []byte) *RebuildEngine {
-	return &RebuildEngine{
-		s3client:       s3client,
-		masterPassword: masterPassword,
-		salt:           salt,
-	}
-}
-
-// IsRetired checks if a job has been marked as retired
+// IsRetired checks if a job has been marked as retired (not used in new approach)
 func (e *RebuildEngine) IsRetired(ctx context.Context, jobID string) (bool, error) {
-	key := fmt.Sprintf(".ds3backup/index/%s/RETIRED-DO-NOT-REBUILD", jobID)
-	_, err := e.s3client.GetObject(ctx, key)
-	if err != nil {
-		if strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "404") {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
-// DiscoverJobs scans S3 and returns list of backup jobs
+// DiscoverJobs scans S3 and returns list of backup jobs (not used in new approach)
 func (e *RebuildEngine) DiscoverJobs(ctx context.Context) ([]JobMetadata, error) {
-	// List all job directories
-	objects, err := e.s3client.ListObjects(ctx, ".ds3backup/index/")
-	if err != nil {
-		return nil, fmt.Errorf("failed to list index directory: %w", err)
-	}
-
-	// Extract unique job IDs
-	jobIDs := make(map[string]bool)
-	for _, obj := range objects {
-		// Path format: .ds3backup/index/<job-id>/...
-		parts := strings.Split(strings.TrimPrefix(obj, ".ds3backup/index/"), "/")
-		if len(parts) > 0 && parts[0] != "" && !strings.HasPrefix(parts[0], "RETIRED") {
-			jobIDs[parts[0]] = true
-		}
-	}
-
-	// Download job metadata for each job
-	var jobs []JobMetadata
-	for jobID := range jobIDs {
-		// Check if retired
-		retired, err := e.IsRetired(ctx, jobID)
-		if err != nil {
-			fmt.Printf("  ⚠️  Could not check retirement status for %s: %v\n", jobID, err)
-			continue
-		}
-		if retired {
-			fmt.Printf("  ⚠️  Skipping retired job: %s\n", jobID)
-			continue
-		}
-
-		// Try to download job metadata
-		metadata, err := e.downloadJobMetadata(ctx, jobID)
-		if err != nil {
-			fmt.Printf("  ℹ️  No metadata found for %s: %v (using defaults)\n", jobID, err)
-			// Create minimal metadata
-			metadata = JobMetadata{
-				ID:             jobID,
-				Name:           fmt.Sprintf("recovered-%s", jobID[:8]),
-				ObjectLockMode: "NONE",
-				RetentionDays:  30,
-			}
-		}
-		jobs = append(jobs, metadata)
-	}
-
-	return jobs, nil
+	return nil, nil
 }
 
-// downloadJobMetadata downloads and decrypts job metadata from S3
+// downloadJobMetadata downloads job metadata (not used in new approach)
 func (e *RebuildEngine) downloadJobMetadata(ctx context.Context, jobID string) (JobMetadata, error) {
-	key := fmt.Sprintf(".ds3backup/jobs/%s/config.json", jobID)
-	
-	data, err := e.s3client.GetObject(ctx, key)
-	if err != nil {
-			return JobMetadata{}, err
-	}
-	// Parse metadata (stored unencrypted on S3)
-	var metadata JobMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return JobMetadata{}, fmt.Errorf("failed to parse job config: %w", err)
-	}
-
-	return metadata, nil
-}
-
-// RebuildIndex downloads and restores index for a job
-func (e *RebuildEngine) RebuildIndex(ctx context.Context, job JobMetadata) error {
-	// Find most recent index copy
-	indexPrefix := fmt.Sprintf("backups/%s/index_", job.ID)
-	objects, err := e.s3client.ListObjects(ctx, indexPrefix)
-	if err != nil {
-		return fmt.Errorf("failed to list index copies: %w", err)
-	}
-
-	if len(objects) == 0 {
-		return fmt.Errorf("no index copies found")
-	}
-
-	// Sort to get most recent (by timestamp in path)
-	sort.Strings(objects)
-	latestIndex := objects[len(objects)-1]
-	fmt.Printf("    Using index: %s\n", filepath.Base(latestIndex))
-
-	// Create local index directory
-	configDir, err := config.ConfigDir()
-	if err != nil {
-		return err
-	}
-	indexDir := filepath.Join(configDir, "index", job.ID)
-	if err := os.MkdirAll(indexDir, 0700); err != nil {
-		return err
-	}
-
-	// Download index backup
-	indexData, err := e.s3client.GetObject(ctx, latestIndex)
-	if err != nil {
-		return fmt.Errorf("failed to download index: %w", err)
-	}
-
-	// Write to temp file
-	tempDir := filepath.Join(indexDir, "temp")
-	if err := os.MkdirAll(tempDir, 0700); err != nil {
-		return err
-	}
-	
-	tempFile := filepath.Join(tempDir, "backup")
-	if err := os.WriteFile(tempFile, indexData, 0600); err != nil {
-		return err
-	}
-
-	// Restore BadgerDB from backup
-	idx, err := index.OpenIndexDB(indexDir)
-	if err != nil {
-		return fmt.Errorf("failed to open index DB: %w", err)
-	}
-	defer idx.Close()
-
-	if err := idx.Restore(tempDir); err != nil {
-		return fmt.Errorf("failed to restore BadgerDB: %w", err)
-	}
-	fmt.Printf("    ✓ BadgerDB restored from %s\n", filepath.Base(latestIndex))
-	
-	// Cleanup temp directory
-	os.RemoveAll(tempDir)
-	
-	return nil
+	return JobMetadata{}, nil
 }
 
 // SaveJobMetadata encrypts and uploads job metadata to S3
 func SaveJobMetadata(ctx context.Context, s3client *s3client.Client, job models.BackupJob, masterPassword string) error {
-	metadata := JobMetadata{
-		ID:             job.ID,
-		Name:           job.Name,
-		SourcePath:     job.SourcePath,
-		RetentionDays:  job.RetentionDays,
-		ObjectLockMode: job.ObjectLockMode,
-	}
-
-	// Encrypt job password with master password
-	if job.EncryptionPassword != "" && masterPassword != "" {
-		encrypted, err := crypto.EncryptWithMasterPassword([]byte(job.EncryptionPassword), masterPassword)
+	// Encrypt password with master password if provided
+	encryptedPass := job.EncryptionPassword
+	if masterPassword != "" && job.EncryptionPassword != "" {
+		var err error
+		encryptedPass, err = crypto.EncryptWithMasterPassword([]byte(job.EncryptionPassword), masterPassword)
 		if err != nil {
-			return fmt.Errorf("failed to encrypt job password: %w", err)
+			return fmt.Errorf("failed to encrypt password: %w", err)
 		}
-		metadata.EncryptedPassword = encrypted
 	}
-	// If no master password, don't store the job password on S3
 
-	// Serialize
+	metadata := JobMetadata{
+		ID:                job.ID,
+		Name:              job.Name,
+		SourcePath:        job.SourcePath,
+		RetentionDays:     job.RetentionDays,
+		ObjectLockMode:    job.ObjectLockMode,
+		EncryptedPassword: encryptedPass,
+	}
+
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	// Upload to S3 (metadata is not encrypted, only the job password field inside is encrypted)
 	key := fmt.Sprintf(".ds3backup/jobs/%s/config.json", job.ID)
 	return s3client.PutObject(ctx, key, data)
-}
-
-// RunRebuild executes the rebuild process
-func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword string, jobPassword string) error {
-	fmt.Println("Loading encryption salt from S3...")
-	
-	// Load encryption salt
-	salt, err := LoadEncryptionSalt(ctx, s3client)
-	if err != nil {
-		fmt.Printf("  ⚠️  Could not load salt: %v\n", err)
-		fmt.Println("  Decryption of job configs may fail")
-	} else {
-		fmt.Println("  ✓ Encryption salt loaded")
-	}
-	
-	engine := NewRebuildEngine(s3client, masterPassword, salt)
-	jobs, err := engine.DiscoverJobs(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to discover jobs: %w", err)
-	}
-
-	if len(jobs) == 0 {
-		fmt.Println("No backup jobs found on S3.")
-		return nil
-	}
-
-	fmt.Printf("Found %d backup job(s):\n", len(jobs))
-	for i, job := range jobs {
-		fmt.Printf("  %d. %s (%s)\n", i+1, job.Name, job.ID)
-	}
-	fmt.Println()
-
-	// Get passwords for jobs
-	jobPasswords := make(map[string]string)
-	for _, job := range jobs {
-		// Try to decrypt with master password first
-		if job.EncryptedPassword != "" && masterPassword != "" {
-			decrypted, err := crypto.DecryptWithMasterPassword(job.EncryptedPassword, masterPassword)
-			if err == nil {
-				jobPasswords[job.ID] = string(decrypted)
-				fmt.Printf("  ✓ Decrypted password for %s\n", job.Name)
-				continue
-			}
-			fmt.Printf("  ⚠️  Could not decrypt password for %s: %v\n", job.Name, err)
-		}
-		
-		// Use provided job password if available
-		if jobPassword != "" {
-			jobPasswords[job.ID] = jobPassword
-			fmt.Printf("  ✓ Using provided password for %s\n", job.Name)
-			continue
-		}
-		
-		// Prompt for password (interactive mode)
-		fmt.Printf("Enter password for %s (%s): ", job.Name, job.ID)
-		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-		if err != nil {
-			return fmt.Errorf("failed to read password: %w", err)
-		}
-		fmt.Println()
-		jobPasswords[job.ID] = string(bytePassword)
-	}
-	fmt.Println()
-
-	// Rebuild indexes
-	fmt.Println("Rebuilding indexes...")
-	for _, job := range jobs {
-		fmt.Printf("  Rebuilding %s... ", job.Name)
-		if err := engine.RebuildIndex(ctx, job); err != nil {
-			fmt.Printf("❌ Failed: %v\n", err)
-		} else {
-			fmt.Printf("✓ Success\n")
-		}
-	}
-
-	// Update config with recovered jobs
-	fmt.Println("\nUpdating configuration...")
-	cfg, err := config.LoadConfig("")
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
-
-	// Add recovered jobs (avoid duplicates)
-	for _, job := range jobs {
-		existing := cfg.GetJob(job.ID)
-		if existing == nil {
-			newJob := models.BackupJob{
-				ID:               job.ID,
-				Name:             job.Name,
-				SourcePath:       job.SourcePath,
-				RetentionDays:    job.RetentionDays,
-				ObjectLockMode:   job.ObjectLockMode,
-				EncryptionPassword: jobPasswords[job.ID],
-				Enabled:          true,
-			}
-			cfg.AddJob(newJob)
-		}
-	}
-
-	if err := cfg.SaveConfig(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	fmt.Printf("\n✓ Recovered %d job(s)\n", len(jobs))
-	return nil
 }

@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"strings"
 	"fmt"
 	"log"
 	"os"
@@ -232,22 +233,13 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 		}
 	}
 
-	// Step 6: Sync index to S3 (central location)
-	log.Println("Syncing index to S3...")
-	err = e.syncIndexToS3(job.ID)
-	if err != nil {
-		log.Printf("WARNING: Failed to sync index to S3: %v", err)
-		run.IndexSyncFailed = true
-	}
-
-	// Step 7: Save index copy alongside backup files (for disaster recovery)
-	log.Println("Saving index copy with backup files...")
-	err = e.saveIndexCopyWithBackup(job.ID, run.RunTime)
-	if err != nil {
-		log.Printf("WARNING: Failed to save index copy: %v", err)
+	// Step 6: Create disaster recovery backup (single tar.gz file)
+	log.Println("Creating disaster recovery backup...")
+	if err := e.createDisasterRecoveryBackup(); err != nil {
+		log.Printf("WARNING: Disaster recovery backup failed: %v", err)
 		run.IndexSyncFailed = true
 	} else {
-		log.Println("✓ Index copy saved")
+		log.Println("✓ Disaster recovery backup created")
 	}
 
 	// Step 7: Apply retention
@@ -257,28 +249,41 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	run.Status = "completed"
 	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, formatBytes(run.BytesUploaded))
 
+	// Step 8: Create disaster recovery backup
+	log.Println("Creating disaster recovery backup...")
+	if err := e.createDisasterRecoveryBackup(); err != nil {
+		log.Printf("WARNING: Disaster recovery backup failed: %v", err)
+		run.IndexSyncFailed = true
+	} else {
+		log.Println("✓ Disaster recovery backup created")
+	}
+
 	return run, nil
 }
 
 // syncIndexToS3 uploads the local index to S3
 func (e *BackupEngine) syncIndexToS3(jobID string) error {
-	// Export BadgerDB to temp directory
-	backupDir := "/tmp/ds3backup-index-" + jobID
-	if err := e.indexDB.Backup(backupDir); err != nil {
-		return fmt.Errorf("failed to backup index: %w", err)
+	// Get local index directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return err
 	}
-	defer os.RemoveAll(backupDir)
-
-	// Upload all index files
-	return filepath.Walk(backupDir, func(path string, info os.FileInfo, err error) error {
+	indexDir := filepath.Join(configDir, "index", jobID)
+	
+	// Upload live BadgerDB files (MANIFEST, *.vlog, *.mem, etc.)
+	return filepath.Walk(indexDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
 			return nil
 		}
+		// Skip temp directories
+		if strings.Contains(path, "/temp/") {
+			return nil
+		}
 
-		relPath, _ := filepath.Rel(backupDir, path)
+		relPath, _ := filepath.Rel(indexDir, path)
 		s3Key := fmt.Sprintf(".ds3backup/index/%s/%s", jobID, relPath)
 
 		data, err := os.ReadFile(path)
@@ -287,7 +292,10 @@ func (e *BackupEngine) syncIndexToS3(jobID string) error {
 		}
 
 		ctx := context.Background()
-		return e.s3client.PutObject(ctx, s3Key, data)
+		if err := e.s3client.PutObject(ctx, s3Key, data); err != nil {
+			return fmt.Errorf("failed to upload %s: %w", relPath, err)
+		}
+		return nil
 	})
 }
 
@@ -323,6 +331,63 @@ func (e *BackupEngine) saveIndexCopyWithBackup(jobID string, backupTime time.Tim
 		ctx := context.Background()
 		return e.s3client.PutObject(ctx, s3Key, data)
 	})
+}
+
+// createDisasterRecoveryBackup creates a complete backup of .ds3backup directory
+func (e *BackupEngine) createDisasterRecoveryBackup() error {
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return err
+	}
+
+	// Create archive file
+	archivePath := filepath.Join(os.TempDir(), ".ds3backup.tar.gz")
+	if err := CreateBackupArchive(configDir, archivePath); err != nil {
+		return fmt.Errorf("failed to create archive: %w", err)
+	}
+	defer os.Remove(archivePath)
+
+	// Calculate checksum
+	checksum, err := CalculateSHA256(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	// Read archive data
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		return err
+	}
+
+	// Upload archive to S3
+	ctx := context.Background()
+	if err := e.s3client.PutObject(ctx, ".ds3backup.tar.gz", data); err != nil {
+		return fmt.Errorf("failed to upload archive: %w", err)
+	}
+
+	// Upload checksum
+	checksumData := []byte(checksum)
+	if err := e.s3client.PutObject(ctx, ".ds3backup.tar.gz.sha256", checksumData); err != nil {
+		return fmt.Errorf("failed to upload checksum: %w", err)
+	}
+
+	// Verify upload by downloading and checking checksum
+	uploadedData, err := e.s3client.GetObject(ctx, ".ds3backup.tar.gz")
+	if err != nil {
+		return fmt.Errorf("failed to verify upload: %w", err)
+	}
+
+	uploadedChecksum, err := CalculateSHA256FromReader(strings.NewReader(string(uploadedData)))
+	if err != nil {
+		return fmt.Errorf("failed to calculate uploaded checksum: %w", err)
+	}
+
+	if uploadedChecksum != checksum {
+		return fmt.Errorf("upload verification failed: expected %s, got %s", checksum, uploadedChecksum)
+	}
+
+	log.Printf("Disaster recovery backup uploaded (%d bytes, SHA256: %s...)", len(data), checksum[:16])
+	return nil
 }
 
 // applyRetention marks old backups for deletion
