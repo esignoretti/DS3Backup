@@ -30,19 +30,21 @@ var iconData = []byte{
 
 // TrayApp manages the macOS system tray lifecycle, menu, and state.
 type TrayApp struct {
-	running    bool
-	apiBaseURL string
-	mu         sync.Mutex
-	menuItems  map[string]*menuItem
-	stopChan   chan struct{}
+	running     bool
+	apiBaseURL  string
+	mu          sync.Mutex
+	menuItems   map[string]*menuItem
+	stopChan    chan struct{}
+	jobRunItems map[string]*systray.MenuItem
 }
 
 // NewTrayApp creates a new TrayApp connected to the daemon API on the given port.
 func NewTrayApp(apiPort int) *TrayApp {
 	return &TrayApp{
-		apiBaseURL: fmt.Sprintf("http://127.0.0.1:%d", apiPort),
-		menuItems:  make(map[string]*menuItem),
-		stopChan:   make(chan struct{}),
+		apiBaseURL:  fmt.Sprintf("http://127.0.0.1:%d", apiPort),
+		menuItems:   make(map[string]*menuItem),
+		stopChan:    make(chan struct{}),
+		jobRunItems: make(map[string]*systray.MenuItem),
 	}
 }
 

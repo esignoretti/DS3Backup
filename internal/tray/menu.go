@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -113,6 +115,9 @@ func (t *TrayApp) refreshStatus() {
 			stopItem.item.SetTitle("▶ Start Scheduler")
 		}
 	}
+
+	// Build per-job backup menu items on first successful status poll
+	t.ensureJobBackupItems()
 }
 
 // queryStatus calls the daemon API for current status.
@@ -146,12 +151,10 @@ func (t *TrayApp) handleMenuClicks() {
 		case <-t.menuItems["quit"].item.ClickedCh:
 			log.Println("Quit requested from tray menu")
 			systray.Quit()
-		case <-t.menuItems["dashboard"].item.ClickedCh:
-			log.Println("Dashboard requested (not yet implemented)")
-			// Future: open browser to API dashboard
-		case <-t.menuItems["runBackup"].item.ClickedCh:
-			log.Println("Run Backup clicked (individual job selection not yet implemented)")
-			// Future: show submenu with job list
+	case <-t.menuItems["dashboard"].item.ClickedCh:
+		t.openDashboard()
+	case <-t.menuItems["runBackup"].item.ClickedCh:
+		log.Println("Run Backup main item clicked — use per-job sub-items")
 		}
 	}
 }
@@ -179,4 +182,95 @@ func (t *TrayApp) toggleScheduler() {
 
 	// Refresh status immediately
 	t.refreshStatus()
+}
+
+// openDashboard opens the dashboard in the default browser.
+func (t *TrayApp) openDashboard() {
+	dashboardURL := t.apiBaseURL + "/"
+	log.Printf("Opening dashboard: %s", dashboardURL)
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", dashboardURL)
+	case "linux":
+		cmd = exec.Command("xdg-open", dashboardURL)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", dashboardURL)
+	default:
+		log.Printf("Unsupported platform for opening browser: %s", runtime.GOOS)
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("Failed to open dashboard: %v", err)
+	}
+}
+
+// ensureJobBackupItems creates per-job backup trigger menu items.
+// Called once on first successful status poll.
+func (t *TrayApp) ensureJobBackupItems() {
+	// Skip if already created
+	if len(t.jobRunItems) > 0 {
+		return
+	}
+
+	jobs, err := t.queryJobs()
+	if err != nil || len(jobs) == 0 {
+		return
+	}
+
+	systray.AddSeparator()
+
+	// Create individual backup trigger items
+	for _, job := range jobs {
+		item := systray.AddMenuItem(
+			fmt.Sprintf("▶ Backup: %s", job.Name),
+			fmt.Sprintf("Trigger backup for %s", job.Name),
+		)
+		t.jobRunItems[job.ID] = item
+
+		// Start a goroutine to handle clicks for this item
+		go func(jobID string, menuItem *systray.MenuItem) {
+			for range menuItem.ClickedCh {
+				t.triggerBackup(jobID)
+			}
+		}(job.ID, item)
+	}
+}
+
+// queryJobs fetches the list of jobs from the API.
+func (t *TrayApp) queryJobs() ([]api.BackupJobWithStatus, error) {
+	resp, err := http.Get(t.apiBaseURL + "/api/v1/jobs")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var jobList api.JobListResponse
+	if err := json.Unmarshal(body, &jobList); err != nil {
+		return nil, err
+	}
+
+	return jobList.Jobs, nil
+}
+
+// triggerBackup sends a POST to trigger a backup for the given job.
+func (t *TrayApp) triggerBackup(jobID string) {
+	log.Printf("Triggering backup for job: %s", jobID)
+	resp, err := http.Post(
+		t.apiBaseURL+"/api/v1/backup/run/"+jobID,
+		"application/json", nil,
+	)
+	if err != nil {
+		log.Printf("Failed to trigger backup for %s: %v", jobID, err)
+		return
+	}
+	resp.Body.Close()
+	log.Printf("Backup triggered for job %s", jobID)
 }
