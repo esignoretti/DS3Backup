@@ -88,6 +88,17 @@ type BackupTriggerResponse struct {
 	Message   string `json:"message"`
 }
 
+// HistoryProvider abstracts backup run history retrieval.
+type HistoryProvider interface {
+	GetJobHistory(jobID string, limit int) ([]*models.BackupRun, error)
+}
+
+// HistoryResponse is the response for the GET /api/v1/jobs/{id}/history endpoint.
+type HistoryResponse struct {
+	JobID string             `json:"jobId"`
+	Runs  []*models.BackupRun `json:"runs"`
+}
+
 // ErrorResponse is a generic error payload for the API.
 type ErrorResponse struct {
 	Error string `json:"error"`

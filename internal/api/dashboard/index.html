@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DS3 Backup Dashboard</title>
+</head>
+<body>
+<h1>DS3 Backup Dashboard</h1>
+<p>Loading dashboard...</p>
+<script>
+fetch('/api/v1/status')
+  .then(r => r.json())
+  .then(s => {
+    document.querySelector('h1').textContent = 'DS3 Backup - ' + (s.running ? 'Running' : 'Stopped');
+  });
+</script>
+</body>
+</html>

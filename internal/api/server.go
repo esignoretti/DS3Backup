@@ -8,24 +8,28 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/esignoretti/ds3backup/internal/api/dashboard"
 )
 
 // APIServer is the HTTP REST API server for daemon control.
 type APIServer struct {
-	port       int
-	runner     BackupRunner
-	jobManager JobManager
-	server     *http.Server
-	mu         sync.RWMutex
-	startTime  time.Time
+	port            int
+	runner          BackupRunner
+	jobManager      JobManager
+	historyProvider HistoryProvider
+	server          *http.Server
+	mu              sync.RWMutex
+	startTime       time.Time
 }
 
 // NewAPIServer creates a new APIServer with the given port and dependencies.
-func NewAPIServer(port int, runner BackupRunner, jobManager JobManager) *APIServer {
+func NewAPIServer(port int, runner BackupRunner, jobManager JobManager, historyProvider HistoryProvider) *APIServer {
 	return &APIServer{
-		port:       port,
-		runner:     runner,
-		jobManager: jobManager,
+		port:            port,
+		runner:          runner,
+		jobManager:      jobManager,
+		historyProvider: historyProvider,
 	}
 }
 
@@ -107,4 +111,21 @@ func (s *APIServer) writeError(w http.ResponseWriter, status int, message string
 		Error: message,
 		Code:  status,
 	})
+}
+
+const placeholderHTML = `<!DOCTYPE html><html><head><title>DS3 Backup</title></head><body><h1>DS3 Backup</h1><p>Dashboard files not found. Ensure dashboard assets are built.</p></body></html>`
+
+// createDashboardHandler returns an http.HandlerFunc that serves the dashboard
+// static files. If no embedded dashboard is available, returns a simple HTML
+// page instructing the user that the dashboard needs to be built.
+func (s *APIServer) createDashboardHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data, err := dashboard.Content.ReadFile("index.html")
+		if err != nil {
+			w.Write([]byte(placeholderHTML))
+			return
+		}
+		w.Write(data)
+	}
 }
