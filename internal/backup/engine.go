@@ -249,15 +249,6 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	run.Status = "completed"
 	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, formatBytes(run.BytesUploaded))
 
-	// Step 8: Create disaster recovery backup
-	log.Println("Creating disaster recovery backup...")
-	if err := e.createDisasterRecoveryBackup(); err != nil {
-		log.Printf("WARNING: Disaster recovery backup failed: %v", err)
-		run.IndexSyncFailed = true
-	} else {
-		log.Println("✓ Disaster recovery backup created")
-	}
-
 	return run, nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/esignoretti/ds3backup/internal/config"
 )
 
@@ -121,7 +122,7 @@ func (c *Client) PutObjectWithLock(ctx context.Context, key string, data []byte,
 		Key:                     aws.String(key),
 		Body:                    bytes.NewReader(data),
 		ContentType:             aws.String("application/octet-stream"),
-		ObjectLockMode:          "GOVERNANCE",
+		ObjectLockMode:          s3types.ObjectLockMode(mode),
 		ObjectLockRetainUntilDate: &retentionUntil,
 	})
 	return err
