@@ -25,6 +25,9 @@ type JobManager interface {
 	GetAllJobs() []models.BackupJob
 	CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error)
 	RemoveJob(jobID string) bool
+	// DeleteJob removes a job after verifying password, optionally purging S3 backup files.
+	// Returns an error if the password is wrong, S3 purge fails, or the job is not found.
+	DeleteJob(jobID, password string, purge bool) error
 }
 
 // BackupJobWithStatus is a sanitized version of BackupJob with
@@ -110,6 +113,12 @@ type BackupTriggerResponse struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 	Code  int    `json:"code"`
+}
+
+// DeleteJobRequest is the JSON body for deleting a job.
+type DeleteJobRequest struct {
+	Password string `json:"password"`
+	Purge    bool   `json:"purge"`
 }
 
 // HistoryResponse is the response for GET /api/v1/jobs/{id}/history.

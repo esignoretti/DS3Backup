@@ -131,13 +131,34 @@ func (s *APIServer) handlePatchJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteJob handles DELETE /api/v1/jobs/{id}.
+// Expects a JSON body with "password" and optionally "purge".
+// The password is verified against the job's stored encryption password.
 func (s *APIServer) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
-	if s.jobManager.RemoveJob(jobID) {
-		s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-	} else {
+
+	job := s.jobManager.GetJob(jobID)
+	if job == nil {
 		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+		return
 	}
+
+	var req DeleteJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Password == "" {
+		s.writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	if err := s.jobManager.DeleteJob(jobID, req.Password, req.Purge); err != nil {
+		s.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // handleGetJobHistory handles GET /api/v1/jobs/{id}/history.

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +62,18 @@ func (m *mockJobManager) RemoveJob(jobID string) bool {
 		return true
 	}
 	return false
+}
+
+func (m *mockJobManager) DeleteJob(jobID, password string, purge bool) error {
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+	if job.EncryptionPassword != password {
+		return fmt.Errorf("incorrect encryption password")
+	}
+	delete(m.jobs, jobID)
+	return nil
 }
 
 // newTestServer creates an APIServer with mock dependencies for testing.

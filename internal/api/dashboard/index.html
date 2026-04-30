@@ -270,6 +270,35 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
   </div>
 </div>
 
+<!-- Delete Job Modal -->
+<div id="deleteJobModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Delete Job</h3>
+      <button class="modal-close" onclick="document.getElementById('deleteJobModal').classList.remove('open')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-bottom:12px;font-size:14px;color:#ff8a80">This will permanently delete the job configuration.</p>
+      <div class="form-group">
+        <label>Job</label>
+        <input type="text" id="deleteJobId" readonly style="background:#0a192f;color:#8892b0" />
+      </div>
+      <div class="form-group">
+        <label>Encryption Password (required to confirm)</label>
+        <input type="password" id="deleteJobPassword" placeholder="Enter the job's encryption password" />
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;margin-top:12px">
+        <input type="checkbox" id="deleteJobPurge" style="width:16px;height:16px;accent-color:#f44336" />
+        <label for="deleteJobPurge" style="display:inline;color:#ff8a80;cursor:pointer">Also delete all backup files from S3 (irreversible)</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="document.getElementById('deleteJobModal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-danger" onclick="confirmDeleteJob()">Delete Job</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const REFRESH_INTERVAL=30000;
 let statusData=null,jobsData=null,historyCache={},refreshTimer=null,isRefreshing=false;
@@ -348,7 +377,7 @@ function createJobCard(job){
     '<div class="job-info-row"><span class="info-label">Retention</span><span class="info-value">'+(job.retentionDays||'—')+' days</span></div>'+
     (job.lastError?'<div class="job-info-row"><span class="info-label" style="color:#ff8a80">Last Error</span><span class="info-value" style="color:#ff8a80">'+escapeHtml(job.lastError)+'</span></div>':'')+
     '<div class="job-actions">'+
-    '<button class="btn btn-primary btn-sm" onclick="triggerBackup(\''+job.id+'\')" id="runBtn-'+job.id+'">▶ Run Backup</button>'+
+    '<button class="btn btn-primary btn-sm" onclick="triggerBackup(\''+job.id+'\')" id="runBtn-'+job.id+'">▶ Run</button>'+
     '<button class="btn btn-outline btn-sm" onclick="restoreJob(\''+job.id+'\')">↩ Restore</button>'+
     '<button class="btn btn-outline btn-sm" onclick="rescheduleJob(\''+job.id+'\',\''+escapeHtml(job.cronExpr||'')+'\')">🔄 Reschedule</button>'+
     '<button class="btn btn-danger btn-sm" onclick="deleteJob(\''+job.id+'\',\''+escapeHtml(job.name||job.id)+'\')">✕ Delete</button>'+
@@ -419,9 +448,24 @@ function rescheduleJob(jobId,currentCron){
 }
 
 function deleteJob(jobId,name){
-  if(!confirm('Delete job "'+name+'" ('+jobId+')? This cannot be undone.'))return;
-  fetch('/api/v1/jobs/'+jobId,{method:'DELETE'}).then(function(r){
-    if(r.ok){showToast('Job "'+name+'" deleted','success');loadDashboard()}else{showToast('Failed to delete job','error')}
+  document.getElementById('deleteJobId').value=name+' ('+jobId+')';
+  document.getElementById('deleteJobId').dataset.jobId=jobId;
+  document.getElementById('deleteJobId').dataset.jobName=name;
+  document.getElementById('deleteJobPassword').value='';
+  document.getElementById('deleteJobPurge').checked=false;
+  document.getElementById('deleteJobModal').classList.add('open');
+}
+
+function confirmDeleteJob(){
+  var jobId=document.getElementById('deleteJobId').dataset.jobId;
+  var name=document.getElementById('deleteJobId').dataset.jobName;
+  var password=document.getElementById('deleteJobPassword').value;
+  var purge=document.getElementById('deleteJobPurge').checked;
+  if(!password){showToast('Password is required to delete the job','error');return}
+  if(!confirm('ARE YOU SURE? This will permanently delete job "'+name+'" ('+jobId+')'+(purge?' AND ALL ITS BACKUP FILES FROM S3':'')+'. This action cannot be undone.'))return;
+  document.getElementById('deleteJobModal').classList.remove('open');
+  fetch('/api/v1/jobs/'+jobId,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:password,purge:purge})}).then(function(r){
+    if(r.ok){showToast('Job "'+name+'" deleted','success');loadDashboard()}else{r.json().then(function(d){showToast('Failed: '+(d.error||r.statusText),'error')})}
   }).catch(function(e){showToast('Error: '+e.message,'error')});
 }
 

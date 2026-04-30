@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -411,6 +412,55 @@ func (a *daemonJobManagerAdapter) RemoveJob(jobID string) bool {
 		}
 	}
 	return false
+}
+
+func (a *daemonJobManagerAdapter) DeleteJob(jobID, password string, purge bool) error {
+	job := a.cfg.GetJob(jobID)
+	if job == nil {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+
+	if job.EncryptionPassword != password {
+		return fmt.Errorf("incorrect encryption password")
+	}
+
+	if purge {
+		log.Printf("Purging S3 backup files for job %s...", jobID)
+
+		s3Client, err := s3client.NewClient(a.cfg.S3)
+		if err != nil {
+			return fmt.Errorf("failed to create S3 client: %w", err)
+		}
+
+		ctx := context.Background()
+
+		// List and delete backup files
+		prefix := fmt.Sprintf("backups/%s/", jobID)
+		objects, err := s3Client.ListObjects(ctx, prefix)
+		if err != nil {
+			return fmt.Errorf("failed to list S3 objects for job: %w", err)
+		}
+
+		for _, key := range objects {
+			_ = s3Client.DeleteObject(ctx, key, true)
+		}
+
+		// Delete index metadata
+		indexPrefix := fmt.Sprintf(".ds3backup/index/%s/", jobID)
+		indexObjects, _ := s3Client.ListObjects(ctx, indexPrefix)
+		for _, key := range indexObjects {
+			_ = s3Client.DeleteObject(ctx, key, true)
+		}
+
+		// Delete job metadata
+		jobMetaKey := fmt.Sprintf(".ds3backup/jobs/%s/config.json.enc", jobID)
+		_ = s3Client.DeleteObject(ctx, jobMetaKey, true)
+
+		log.Printf("Purged S3 backup files for job %s", jobID)
+	}
+
+	a.RemoveJob(jobID)
+	return nil
 }
 
 // daemonHistoryProvider wraps config to implement api.HistoryProvider.
