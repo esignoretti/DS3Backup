@@ -5,51 +5,62 @@
 See: .planning/PROJECT.md (not yet created)
 
 **Core value:** Provide a secure, S3-only backup solution with client-side encryption, scheduling, and an intuitive interface
-**Current focus:** Phase 2 — Scheduling & Server
+**Current focus:** Phase 1.5 — Refactor Backup & Restore
 
 ## Current Position
 
-Phase: 2 of 4 (Scheduling & Server)
-Plan: 4 of 4 in current phase (02-04-PLAN.md complete)
-Status: Executing, 4 of 4 plans done
-Last activity: 2026-04-29 — Executed 02-04-PLAN.md (Tests, Auto-Start & Dependency Cleanup)
+Phase: 1.5 of 5 (Refactor Backup & Restore) — INSERTED
+Plan: 1 of 3 in current phase
+Status: Planned, awaiting execution
+Last activity: 2026-04-30 — Created Phase 1.5 (inserted between Phase 1 and Phase 2)
 
-Progress: [████████░░] 80%
+Progress: [████████░░] 40% (overall project)
+Note: Phase 2 is complete; Phase 1.5 is inserted due to accumulated tech debt.
 
 ## Performance Metrics
 
 **Velocity:**
 - Total plans completed: 4
+- Current plans: 3 planned (Phase 1.5)
 - Average duration: ~7m 15s
-- Total execution time: ~29m 0s
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | N/A |
+| 1.5. Refactor Backup & Restore | 3/3 | 📋 Planned | - |
 | 2. Scheduling & Server | 4/4 | ✅ Complete | ~7m 15s |
 
 ## Accumulated Context
 
 ### Decisions
 
-Key design decisions for Phase 2:
-- D-01: Use `github.com/robfig/cron/v3` for cron expression parsing and scheduling
-- D-02: Use Go standard library `net/http` for the REST API (no external framework)
-- D-03: API binds to 127.0.0.1 only (localhost) for security
-- D-04: Use `github.com/getlantern/systray` for macOS system tray integration
-- D-05: Use macOS LaunchAgent plist for auto-start-on-login
-- D-06: Daemon stores PID at `~/.ds3backup/daemon.pid` for PID-based status detection
-- D-07: Use Go 1.22+ ServeMux path parameters ({id} syntax) instead of manual path parsing
-- D-08: Sanitize job responses via BackupJobWithStatus to exclude EncryptionPassword from JSON output
-- D-09: Return HTTP 202 Accepted for async backup triggers (non-blocking)
-- D-10: daemon stop command tries API stop first, falls back to SIGTERM via PID
-- D-11: Desktop notifications use platform-specific APIs (osascript/notify-send)
+Key design decisions for Phase 2 (previous):
+- D-01 through D-11: (See Phase 2 context — completed)
+
+Key design decisions for Phase 1.5 (Refactor Backup & Restore):
+- D-1.5-01: Remove duplicate DR backup call (engine.go line 252-259)
+- D-1.5-02: Use `mode` parameter instead of hardcoded "GOVERNANCE" in PutObjectWithLock
+- D-1.5-03: Implement direct S3 deletion in applyRetention for GOVERNANCE mode
+- D-1.5-04: Remove badger/v3 dependency from go.mod
+- D-1.5-05: Extract shared runRestorePipeline for restore worker pattern consolidation
+- D-1.5-06: Centralize formatBytes/formatDuration in internal/util/format.go
+- D-1.5-07: Remove obsolete RebuildEngine stubs
+- D-1.5-08: Only save config with updated LastRun when err == nil
+- D-1.5-09: Use version.go constant as source of truth (0.0.7)
+- D-1.5-10: Implement real PutBucketLifecycleConfiguration/GetBucketLifecycleConfiguration
+- D-1.5-11: Implement index rebuild from S3 batch manifests
+- D-1.5-12: Use PutObjectWithLock in BatchBuilder.Upload
+- D-1.5-13: Accept macOS BadgerDB lock issue (documented)
 
 ### Pending Todos
 
-None.
+| Priority | Item | Phase | Status |
+|----------|------|-------|--------|
+| High | Execute Phase 1.5 Plan 01 — Bug fixes, deps, formatting | 1.5 | Planned |
+| High | Execute Phase 1.5 Plan 02 — Lifecycle, retention, batch Object Lock | 1.5 | Planned |
+| Medium | Execute Phase 1.5 Plan 03 — Restore refactor, stubs, index rebuild | 1.5 | Planned |
 
 ### Blockers/Concerns
 
@@ -63,6 +74,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-29 (execution session)
-Stopped at: Completed 02-04-PLAN.md (Tests, Auto-Start & Dependency Cleanup)
-Resume file: Execute `/gsd-execute-phase 03` next
+Last session: 2026-04-30 (planning session)
+Stopped at: Created Phase 1.5 plans (3 plans)
+Resume file: Execute `/gsd-execute-phase 1.5-refactor-backup-restore` next
