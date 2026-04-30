@@ -10,20 +10,20 @@ import (
 )
 
 type Scheduler struct {
-	mu      sync.Mutex
-	cron    *cron.Cron
-	entries map[string]cron.EntryID
+	mu       sync.Mutex
+	cron     *cron.Cron
+	entries  map[string][]cron.EntryID
 	interval time.Duration
-	running bool
-	logger  *log.Logger
+	running  bool
+	logger   *log.Logger
 }
 
 func NewScheduler(interval time.Duration, logger *log.Logger) *Scheduler {
 	return &Scheduler{
-		cron:    cron.New(cron.WithParser(cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow))),
-		entries: make(map[string]cron.EntryID),
+		cron:     cron.New(cron.WithParser(cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow))),
+		entries:  make(map[string][]cron.EntryID),
 		interval: interval,
-		logger:  logger,
+		logger:   logger,
 	}
 }
 
@@ -56,21 +56,37 @@ func (s *Scheduler) IsRunning() bool {
 	return s.running
 }
 
-func (s *Scheduler) ScheduleJob(jobID string, cronExpr string, runner func()) error {
+func (s *Scheduler) ScheduleJob(jobID string, cronExprs []string, runner func()) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.entries[jobID]; exists {
-		s.cron.Remove(s.entries[jobID])
+	// Remove existing entries first
+	if existing, exists := s.entries[jobID]; exists {
+		for _, entryID := range existing {
+			s.cron.Remove(entryID)
+		}
+		delete(s.entries, jobID)
 	}
 
-	entryID, err := s.cron.AddFunc(cronExpr, runner)
-	if err != nil {
-		return fmt.Errorf("invalid cron expression %q: %w", cronExpr, err)
+	if len(cronExprs) == 0 {
+		return fmt.Errorf("at least one cron expression is required")
 	}
 
-	s.entries[jobID] = entryID
-	s.logger.Printf("Scheduled job %s with cron %s", jobID, cronExpr)
+	var entryIDs []cron.EntryID
+	for _, expr := range cronExprs {
+		entryID, err := s.cron.AddFunc(expr, runner)
+		if err != nil {
+			// Roll back any entries already added for this job
+			for _, eid := range entryIDs {
+				s.cron.Remove(eid)
+			}
+			return fmt.Errorf("invalid cron expression %q: %w", expr, err)
+		}
+		entryIDs = append(entryIDs, entryID)
+	}
+
+	s.entries[jobID] = entryIDs
+	s.logger.Printf("Scheduled job %s with %d cron expressions", jobID, len(cronExprs))
 	return nil
 }
 
@@ -78,10 +94,12 @@ func (s *Scheduler) UnscheduleJob(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if entryID, exists := s.entries[jobID]; exists {
-		s.cron.Remove(entryID)
+	if entryIDs, exists := s.entries[jobID]; exists {
+		for _, entryID := range entryIDs {
+			s.cron.Remove(entryID)
+		}
 		delete(s.entries, jobID)
-		s.logger.Printf("Unscheduled job %s", jobID)
+		s.logger.Printf("Unscheduled job %s (%d entries removed)", jobID, len(entryIDs))
 	}
 }
 
@@ -99,15 +117,15 @@ func (s *Scheduler) GetScheduledJobs() []string {
 func (s *Scheduler) HasJob(jobID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, exists := s.entries[jobID]
-	return exists
+	entryIDs, exists := s.entries[jobID]
+	return exists && len(entryIDs) > 0
 }
 
 // JobSchedule represents a scheduled job entry for ReloadJobs
 type JobSchedule struct {
-	ID       string
-	Enabled  bool
-	CronExpr string
+	ID        string
+	Enabled   bool
+	CronExprs []string
 }
 
 func (s *Scheduler) ReloadJobs(jobs []JobSchedule, runnerFactory func(jobID string) func()) {
@@ -115,21 +133,29 @@ func (s *Scheduler) ReloadJobs(jobs []JobSchedule, runnerFactory func(jobID stri
 	defer s.mu.Unlock()
 
 	// Remove all current entries
-	for _, entryID := range s.entries {
-		s.cron.Remove(entryID)
+	for _, entryIDs := range s.entries {
+		for _, entryID := range entryIDs {
+			s.cron.Remove(entryID)
+		}
 	}
-	s.entries = make(map[string]cron.EntryID)
+	s.entries = make(map[string][]cron.EntryID)
 
 	// Schedule enabled jobs with cron expressions
 	for _, job := range jobs {
-		if job.Enabled && job.CronExpr != "" {
-			entryID, err := s.cron.AddFunc(job.CronExpr, runnerFactory(job.ID))
-			if err != nil {
-				s.logger.Printf("Warning: failed to schedule job %s: %v", job.ID, err)
-				continue
+		if job.Enabled && len(job.CronExprs) > 0 {
+			var entryIDs []cron.EntryID
+			for _, expr := range job.CronExprs {
+				entryID, err := s.cron.AddFunc(expr, runnerFactory(job.ID))
+				if err != nil {
+					s.logger.Printf("Warning: failed to schedule job %s expr %q: %v", job.ID, expr, err)
+					continue
+				}
+				entryIDs = append(entryIDs, entryID)
 			}
-			s.entries[job.ID] = entryID
-			s.logger.Printf("Loaded schedule for job %s: %s", job.ID, job.CronExpr)
+			if len(entryIDs) > 0 {
+				s.entries[job.ID] = entryIDs
+				s.logger.Printf("Loaded schedule for job %s: %d expressions", job.ID, len(entryIDs))
+			}
 		}
 	}
 }

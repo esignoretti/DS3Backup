@@ -1,24 +1,50 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
-// BackupJob represents a backup job configuration
+// BackupJob represents a backup job configuration.
+// CronExprs holds one or more cron expressions for the job's schedule.
+// The custom UnmarshalJSON also handles the legacy single-cronExpr format
+// for backward compatibility with existing config files.
 type BackupJob struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	SourcePath       string    `json:"sourcePath"`
-	RetentionDays    int       `json:"retentionDays"`
-	ObjectLockMode   string    `json:"objectLockMode"`
-	Enabled          bool      `json:"enabled"`
-	EncryptionPassword string  `json:"encryptionPassword"`
-	CreatedAt        time.Time `json:"createdAt"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	SourcePath       string     `json:"sourcePath"`
+	RetentionDays    int        `json:"retentionDays"`
+	ObjectLockMode   string     `json:"objectLockMode"`
+	Enabled          bool       `json:"enabled"`
+	EncryptionPassword string   `json:"encryptionPassword"`
+	CreatedAt        time.Time  `json:"createdAt"`
 	LastRun          *time.Time `json:"lastRun,omitempty"`
-	NextRun          time.Time `json:"nextRun"`
-	LastError        string    `json:"lastError,omitempty"`
-	ScheduleEnabled  bool      `json:"scheduleEnabled"`
-	CronExpr         string    `json:"cronExpr,omitempty"`
+	NextRun          time.Time  `json:"nextRun"`
+	LastError        string     `json:"lastError,omitempty"`
+	ScheduleEnabled  bool       `json:"scheduleEnabled"`
+	CronExprs        []string   `json:"cronExprs,omitempty"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for BackupJob.
+// It handles both the new cronExprs format and the legacy single cronExpr format
+// to ensure existing config files migrate cleanly.
+func (j *BackupJob) UnmarshalJSON(data []byte) error {
+	// Alias to avoid infinite recursion
+	type jobAlias BackupJob
+	raw := struct {
+		*jobAlias
+		LegacyCronExpr string `json:"cronExpr,omitempty"`
+	}{
+		jobAlias: (*jobAlias)(j),
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	// If no new-format expressions exist but a legacy cronExpr was set, migrate it
+	if len(j.CronExprs) == 0 && raw.LegacyCronExpr != "" {
+		j.CronExprs = []string{raw.LegacyCronExpr}
+	}
+	return nil
 }
 
 // FileEntry represents a file in the backup index

@@ -146,8 +146,8 @@ var jobListCmd = &cobra.Command{
 			} else {
 				fmt.Printf("   Last Run: Never\n")
 			}
-			if job.ScheduleEnabled && job.CronExpr != "" {
-				fmt.Printf("   Schedule: %s\n", job.CronExpr)
+			if job.ScheduleEnabled && len(job.CronExprs) > 0 {
+				fmt.Printf("   Schedule: %v\n", job.CronExprs)
 			}
 			fmt.Println()
 		}
@@ -302,7 +302,7 @@ Examples:
 
 		if jobDisable {
 			job.ScheduleEnabled = false
-			job.CronExpr = ""
+			job.CronExprs = nil
 			if err := saveConfig(cfg); err != nil {
 				return fmt.Errorf("failed to save config: %w", err)
 			}
@@ -321,7 +321,7 @@ Examples:
 		}
 
 		job.ScheduleEnabled = true
-		job.CronExpr = jobCron
+		job.CronExprs = []string{jobCron}
 		if err := saveConfig(cfg); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
 		}

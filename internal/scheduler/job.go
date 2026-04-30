@@ -22,25 +22,29 @@ func NewScheduleManager(cfg *config.Config, scheduler *Scheduler, runner *Backup
 	}
 }
 
-func (m *ScheduleManager) EnableJobSchedule(jobID string, cronExpr string) error {
+func (m *ScheduleManager) EnableJobSchedule(jobID string, cronExprs []string) error {
+	if len(cronExprs) == 0 {
+		return fmt.Errorf("at least one cron expression is required")
+	}
+
 	job := m.cfg.GetJob(jobID)
 	if job == nil {
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
-	// Validate cron expression by trying to schedule
-	if err := m.scheduler.ScheduleJob(jobID, cronExpr, m.runner.RunnerFactory()(jobID)); err != nil {
+	// Validate cron expressions by trying to schedule
+	if err := m.scheduler.ScheduleJob(jobID, cronExprs, m.runner.RunnerFactory()(jobID)); err != nil {
 		return err
 	}
 
 	job.ScheduleEnabled = true
-	job.CronExpr = cronExpr
+	job.CronExprs = cronExprs
 
 	if err := m.cfg.SaveConfig(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	log.Printf("Schedule enabled for job %s: %s", jobID, cronExpr)
+	log.Printf("Schedule enabled for job %s: %v", jobID, cronExprs)
 	return nil
 }
 
@@ -60,7 +64,11 @@ func (m *ScheduleManager) DisableJobSchedule(jobID string) {
 	log.Printf("Schedule disabled for job %s", jobID)
 }
 
-func (m *ScheduleManager) RescheduleJob(jobID string, cronExpr string) error {
+func (m *ScheduleManager) RescheduleJob(jobID string, cronExprs []string) error {
+	if len(cronExprs) == 0 {
+		return fmt.Errorf("at least one cron expression is required")
+	}
+
 	job := m.cfg.GetJob(jobID)
 	if job == nil {
 		return fmt.Errorf("job not found: %s", jobID)
@@ -68,18 +76,18 @@ func (m *ScheduleManager) RescheduleJob(jobID string, cronExpr string) error {
 
 	m.scheduler.UnscheduleJob(jobID)
 
-	if err := m.scheduler.ScheduleJob(jobID, cronExpr, m.runner.RunnerFactory()(jobID)); err != nil {
+	if err := m.scheduler.ScheduleJob(jobID, cronExprs, m.runner.RunnerFactory()(jobID)); err != nil {
 		return err
 	}
 
-	job.CronExpr = cronExpr
+	job.CronExprs = cronExprs
 	job.ScheduleEnabled = true
 
 	if err := m.cfg.SaveConfig(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	log.Printf("Schedule updated for job %s: %s", jobID, cronExpr)
+	log.Printf("Schedule updated for job %s: %v", jobID, cronExprs)
 	return nil
 }
 
@@ -87,9 +95,9 @@ func (m *ScheduleManager) LoadAllSchedules() {
 	schedules := make([]JobSchedule, 0, len(m.cfg.Jobs))
 	for _, job := range m.cfg.Jobs {
 		schedules = append(schedules, JobSchedule{
-			ID:       job.ID,
-			Enabled:  job.ScheduleEnabled,
-			CronExpr: job.CronExpr,
+			ID:        job.ID,
+			Enabled:   job.ScheduleEnabled,
+			CronExprs: job.CronExprs,
 		})
 	}
 
