@@ -175,7 +175,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 
 	// Step 5: Upload remaining batch
 	if batchBuilder.FileCount() > 0 {
-		manifest, err := batchBuilder.Upload(ctx, e.s3client)
+		manifest, err := batchBuilder.Upload(ctx, e.s3client, job.ObjectLockMode, job.RetentionDays)
 		if err != nil {
 			log.Printf("WARNING: Final batch upload failed: %v", err)
 			run.IndexSyncFailed = true

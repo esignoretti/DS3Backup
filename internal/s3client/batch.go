@@ -93,17 +93,17 @@ func (b *BatchBuilder) Size() int64 {
 	return b.currentSize
 }
 
-// Upload uploads batch to S3
-func (b *BatchBuilder) Upload(ctx context.Context, client *Client) (*models.BatchManifest, error) {
+// Upload uploads batch to S3 with optional Object Lock parameters
+func (b *BatchBuilder) Upload(ctx context.Context, client *Client, lockMode string, retentionDays int) (*models.BatchManifest, error) {
 	if len(b.files) == 0 {
 		return nil, nil
 	}
 
 	batchID := fmt.Sprintf("batch_%d", time.Now().UnixNano())
 
-	// Upload batch archive
+	// Upload batch archive with Object Lock
 	batchKey := fmt.Sprintf("backups/%s/batches/%s.enc", b.jobID, batchID)
-	if err := client.PutObject(ctx, batchKey, b.buffer.Bytes()); err != nil {
+	if err := client.PutObjectWithLock(ctx, batchKey, b.buffer.Bytes(), lockMode, retentionDays); err != nil {
 		return nil, fmt.Errorf("failed to upload batch: %w", err)
 	}
 
@@ -129,10 +129,10 @@ func (b *BatchBuilder) Upload(ctx context.Context, client *Client) (*models.Batc
 		}
 	}
 
-	// Upload manifest
+	// Upload manifest with Object Lock
 	manifestData, _ := json.Marshal(manifest)
 	manifestKey := fmt.Sprintf("backups/%s/batches/%s-manifest.json.enc", b.jobID, batchID)
-	if err := client.PutObject(ctx, manifestKey, manifestData); err != nil {
+	if err := client.PutObjectWithLock(ctx, manifestKey, manifestData, lockMode, retentionDays); err != nil {
 		return nil, fmt.Errorf("failed to upload manifest: %w", err)
 	}
 
