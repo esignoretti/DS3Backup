@@ -13,6 +13,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/internal/util"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -71,7 +72,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 		run.Error = err.Error()
 		return run, fmt.Errorf("failed to scan directory: %w", err)
 	}
-	log.Printf("Found %d files (%s)", scanResult.TotalFiles, formatBytes(scanResult.TotalSize))
+	log.Printf("Found %d files (%s)", scanResult.TotalFiles, util.FormatBytes(scanResult.TotalSize))
 
 	// Step 2: Filter changed files (skip if full backup)
 	entries := scanResult.Files
@@ -247,7 +248,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	e.applyRetention(job)
 
 	run.Status = "completed"
-	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, formatBytes(run.BytesUploaded))
+	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, util.FormatBytes(run.BytesUploaded))
 
 	return run, nil
 }
@@ -401,16 +402,4 @@ func (e *BackupEngine) applyRetention(job *models.BackupJob) {
 	}
 }
 
-// formatBytes formats bytes as human-readable string
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
+
