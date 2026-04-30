@@ -23,6 +23,10 @@ type BackupJob struct {
 	LastError        string     `json:"lastError,omitempty"`
 	ScheduleEnabled  bool       `json:"scheduleEnabled"`
 	CronExprs        []string   `json:"cronExprs,omitempty"`
+	NextRetryTime      time.Time  `json:"nextRetryTime,omitempty"`
+	RetryCount         int        `json:"retryCount,omitempty"`
+	RunInProgress      bool       `json:"-"`
+	LastCheckpointTime time.Time  `json:"lastCheckpointTime,omitempty"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for BackupJob.
