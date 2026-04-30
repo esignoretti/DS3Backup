@@ -23,7 +23,7 @@ type BackupRunner interface {
 type JobManager interface {
 	GetJob(jobID string) *models.BackupJob
 	GetAllJobs() []models.BackupJob
-	CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error)
+	CreateJob(name, source, password string, cronExprs []string, retentionDays int, objectLockMode string) (*models.BackupJob, error)
 	RemoveJob(jobID string) bool
 	DeleteJob(jobID, password string, purge bool) error
 }
@@ -42,27 +42,41 @@ type BackupJobWithStatus struct {
 	NextRun         time.Time  `json:"nextRun,omitempty"`
 	LastError       string     `json:"lastError,omitempty"`
 	ScheduleEnabled bool       `json:"scheduleEnabled"`
-	CronExpr        string     `json:"cronExpr,omitempty"`
+	CronExprs       []string   `json:"cronExprs,omitempty"`
 }
 
 // CreateJobRequest is the JSON body for creating a new job.
+// CronExprs is the preferred field for specifying schedules. CronExpr (single string)
+// is kept for backward compatibility and is converted to a single-element CronExprs slice.
 type CreateJobRequest struct {
-	Name           string `json:"name"`
-	SourcePath     string `json:"sourcePath"`
-	Password       string `json:"password"`
-	CronExpr       string `json:"cronExpr,omitempty"`
-	RetentionDays  int    `json:"retentionDays,omitempty"`
-	ObjectLockMode string `json:"objectLockMode,omitempty"`
+	Name           string   `json:"name"`
+	SourcePath     string   `json:"sourcePath"`
+	Password       string   `json:"password"`
+	CronExprs      []string `json:"cronExprs,omitempty"`
+	CronExpr       string   `json:"cronExpr,omitempty"`  // Deprecated: use CronExprs
+	RetentionDays  int      `json:"retentionDays,omitempty"`
+	ObjectLockMode string   `json:"objectLockMode,omitempty"`
 }
 
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting
 // the EncryptionPassword field for safe API responses.
 func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 	nextRun := job.NextRun
-	if nextRun.IsZero() && job.ScheduleEnabled && job.CronExpr != "" {
+	if nextRun.IsZero() && job.ScheduleEnabled && len(job.CronExprs) > 0 {
 		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		if sched, err := parser.Parse(job.CronExpr); err == nil {
-			nextRun = sched.Next(time.Now())
+		// Compute the nearest upcoming run across all cron expressions
+		now := time.Now()
+		var nearest time.Time
+		for _, expr := range job.CronExprs {
+			if sched, err := parser.Parse(expr); err == nil {
+				candidate := sched.Next(now)
+				if nearest.IsZero() || candidate.Before(nearest) {
+					nearest = candidate
+				}
+			}
+		}
+		if !nearest.IsZero() {
+			nextRun = nearest
 		}
 	}
 	return BackupJobWithStatus{
@@ -77,7 +91,7 @@ func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 		NextRun:         nextRun,
 		LastError:       job.LastError,
 		ScheduleEnabled: job.ScheduleEnabled,
-		CronExpr:        job.CronExpr,
+		CronExprs:       job.CronExprs,
 	}
 }
 
@@ -97,9 +111,9 @@ type JobListResponse struct {
 
 // JobDetailResponse is the response for the GET /api/v1/jobs/{id} endpoint.
 type JobDetailResponse struct {
-	Job      BackupJobWithStatus `json:"job"`
-	IsScheduled bool             `json:"scheduled"`
-	CronExpr string              `json:"cronExpr"`
+	Job         BackupJobWithStatus `json:"job"`
+	IsScheduled bool                `json:"scheduled"`
+	CronExprs   []string            `json:"cronExprs,omitempty"`
 }
 
 // BackupTriggerResponse is the response for the POST /api/v1/backup/run/{id} endpoint.

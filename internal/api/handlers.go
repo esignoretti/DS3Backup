@@ -60,7 +60,7 @@ func (s *APIServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, JobDetailResponse{
 		Job:         sanitized,
 		IsScheduled: job.ScheduleEnabled,
-		CronExpr:    job.CronExpr,
+		CronExprs:   job.CronExprs,
 	})
 }
 
@@ -74,6 +74,13 @@ func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "name, sourcePath, and password are required")
 		return
 	}
+
+	// Backward compat: if cronExprs is empty but old cronExpr is set, convert
+	cronExprs := req.CronExprs
+	if len(cronExprs) == 0 && req.CronExpr != "" {
+		cronExprs = []string{req.CronExpr}
+	}
+
 	retentionDays := req.RetentionDays
 	if retentionDays <= 0 {
 		retentionDays = 30
@@ -82,7 +89,7 @@ func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	if objectLockMode == "" {
 		objectLockMode = "NONE"
 	}
-	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, req.CronExpr, retentionDays, objectLockMode)
+	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, cronExprs, retentionDays, objectLockMode)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -114,15 +121,24 @@ func (s *APIServer) handlePatchJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		CronExpr *string `json:"cronExpr"`
+		CronExprs *[]string `json:"cronExprs"`
+		CronExpr  *string   `json:"cronExpr"` // Deprecated: use cronExprs
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if req.CronExpr != nil {
-		job.CronExpr = *req.CronExpr
+	if req.CronExprs != nil {
+		job.CronExprs = *req.CronExprs
+		job.ScheduleEnabled = len(*req.CronExprs) > 0
+	} else if req.CronExpr != nil {
+		// Backward compat: single cronExpr converted to slice
+		if *req.CronExpr != "" {
+			job.CronExprs = []string{*req.CronExpr}
+		} else {
+			job.CronExprs = nil
+		}
 		job.ScheduleEnabled = *req.CronExpr != ""
 	}
 
