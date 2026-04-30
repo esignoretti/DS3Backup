@@ -2,6 +2,8 @@ package s3client
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"strings"
 	"context"
 	"fmt"
@@ -14,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/esignoretti/ds3backup/internal/config"
 )
 
@@ -121,7 +125,7 @@ func (c *Client) PutObjectWithLock(ctx context.Context, key string, data []byte,
 		Key:                     aws.String(key),
 		Body:                    bytes.NewReader(data),
 		ContentType:             aws.String("application/octet-stream"),
-		ObjectLockMode:          "GOVERNANCE",
+		ObjectLockMode:          s3types.ObjectLockMode(mode),
 		ObjectLockRetainUntilDate: &retentionUntil,
 	})
 	return err
@@ -234,16 +238,57 @@ func (c *Client) CheckObjectLockSupport() (bool, error) {
 	return true, nil
 }
 
-// SetLifecyclePolicy sets lifecycle policy for retention cleanup
+// SetLifecyclePolicy configures S3 lifecycle policy for retention cleanup
 func (c *Client) SetLifecyclePolicy(ctx context.Context, retentionDays int) error {
-	fmt.Printf("Note: Lifecycle policy must be set manually in your S3 provider's console.\n")
-	fmt.Printf("Recommended policy: Delete objects in 'backups/' prefix older than %d days.\n", retentionDays+1)
-	return nil
+	// Build lifecycle rule: expire objects in the backups/ prefix
+	rule := s3types.LifecycleRule{
+		ID:     aws.String("ds3backup-retention"),
+		Status: s3types.ExpirationStatusEnabled,
+		Filter: &s3types.LifecycleRuleFilter{
+			Prefix: aws.String("backups/"),
+		},
+		Expiration: &s3types.LifecycleExpiration{
+			Days: aws.Int32(int32(retentionDays)),
+		},
+		NoncurrentVersionExpiration: &s3types.NoncurrentVersionExpiration{
+			NoncurrentDays: aws.Int32(int32(retentionDays)),
+		},
+	}
+
+	input := &s3.PutBucketLifecycleConfigurationInput{
+		Bucket: aws.String(c.bucket),
+		LifecycleConfiguration: &s3types.BucketLifecycleConfiguration{
+			Rules: []s3types.LifecycleRule{rule},
+		},
+	}
+
+	_, err := c.client.PutBucketLifecycleConfiguration(ctx, input)
+	return err
 }
 
 // GetLifecyclePolicy gets the current lifecycle policy
 func (c *Client) GetLifecyclePolicy(ctx context.Context) (string, error) {
-	return "Lifecycle policy check not available - please check your S3 provider's console", nil
+	input := &s3.GetBucketLifecycleConfigurationInput{
+		Bucket: aws.String(c.bucket),
+	}
+
+	output, err := c.client.GetBucketLifecycleConfiguration(ctx, input)
+	if err != nil {
+		// Check if no lifecycle config exists (NoSuchLifecycleConfiguration)
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchLifecycleConfiguration" {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get lifecycle policy: %w", err)
+	}
+
+	// Pretty-print the lifecycle configuration as JSON
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal lifecycle config: %w", err)
+	}
+
+	return string(data), nil
 }
 
 // BucketExists checks if bucket exists

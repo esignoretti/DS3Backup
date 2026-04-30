@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"sync"
@@ -123,7 +124,12 @@ const placeholderHTML = `<!DOCTYPE html><html><head><title>DS3 Backup</title></h
 func (s *APIServer) createDashboardHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		data, err := dashboard.Content.ReadFile("index.html")
+		dashFS := dashboard.GetDashboardFS()
+		if dashFS == nil {
+			w.Write([]byte(placeholderHTML))
+			return
+		}
+		data, err := fs.ReadFile(dashFS, "index.html")
 		if err != nil {
 			w.Write([]byte(placeholderHTML))
 			return

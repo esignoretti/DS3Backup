@@ -13,6 +13,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/internal/util"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -71,7 +72,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 		run.Error = err.Error()
 		return run, fmt.Errorf("failed to scan directory: %w", err)
 	}
-	log.Printf("Found %d files (%s)", scanResult.TotalFiles, formatBytes(scanResult.TotalSize))
+	log.Printf("Found %d files (%s)", scanResult.TotalFiles, util.FormatBytes(scanResult.TotalSize))
 
 	// Step 2: Filter changed files (skip if full backup)
 	entries := scanResult.Files
@@ -174,7 +175,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 
 	// Step 5: Upload remaining batch
 	if batchBuilder.FileCount() > 0 {
-		manifest, err := batchBuilder.Upload(ctx, e.s3client)
+		manifest, err := batchBuilder.Upload(ctx, e.s3client, job.ObjectLockMode, job.RetentionDays)
 		if err != nil {
 			log.Printf("WARNING: Final batch upload failed: %v", err)
 			run.IndexSyncFailed = true
@@ -244,19 +245,13 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 
 	// Step 7: Apply retention
 	log.Println("Applying retention policy...")
-	e.applyRetention(job)
+	ctxRetention := context.Background()
+	if err := e.applyRetention(ctxRetention, job); err != nil {
+		log.Printf("WARNING: Retention policy failed: %v", err)
+	}
 
 	run.Status = "completed"
-	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, formatBytes(run.BytesUploaded))
-
-	// Step 8: Create disaster recovery backup
-	log.Println("Creating disaster recovery backup...")
-	if err := e.createDisasterRecoveryBackup(); err != nil {
-		log.Printf("WARNING: Disaster recovery backup failed: %v", err)
-		run.IndexSyncFailed = true
-	} else {
-		log.Println("✓ Disaster recovery backup created")
-	}
+	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, util.FormatBytes(run.BytesUploaded))
 
 	return run, nil
 }
@@ -390,36 +385,50 @@ func (e *BackupEngine) createDisasterRecoveryBackup() error {
 	return nil
 }
 
-// applyRetention marks old backups for deletion
-func (e *BackupEngine) applyRetention(job *models.BackupJob) {
+// applyRetention deletes expired backup objects beyond the retention period
+func (e *BackupEngine) applyRetention(ctx context.Context, job *models.BackupJob) error {
 	cutoff := time.Now().AddDate(0, 0, -job.RetentionDays)
 
-	// Get old backup runs
 	runs, err := e.indexDB.GetBackupHistory(job.ID, 1000)
 	if err != nil {
-		log.Printf("WARNING: Failed to get backup history: %v", err)
-		return
+		return fmt.Errorf("failed to get backup history: %w", err)
 	}
 
-	// Mark expired runs (S3 lifecycle will handle actual deletion)
+	var deletedCount int
 	for _, run := range runs {
-		if run.RunTime.Before(cutoff) {
-			log.Printf("Marking backup from %s for deletion (expired)", run.RunTime.Format(time.RFC3339))
-			// In production: mark objects for deletion in S3
+		if !run.RunTime.Before(cutoff) {
+			continue
+		}
+
+		log.Printf("Applying retention for backup from %s", run.RunTime.Format(time.RFC3339))
+
+		if job.ObjectLockMode == "COMPLIANCE" {
+			log.Printf("WARNING: Cannot delete COMPLIANCE-locked backup from %s within retention period", run.RunTime.Format(time.RFC3339))
+			continue
+		}
+
+		// Get entries for this run
+		entries, err := e.indexDB.GetEntriesForRun(job.ID, run.RunTime)
+		if err != nil {
+			log.Printf("WARNING: Failed to get entries for run %s: %v", run.RunTime.Format(time.RFC3339), err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.S3Key != "" {
+				if err := e.s3client.DeleteObject(ctx, entry.S3Key, true); err != nil {
+					log.Printf("WARNING: Failed to delete %s: %v", entry.S3Key, err)
+					continue
+				}
+				deletedCount++
+			}
 		}
 	}
+
+	if deletedCount > 0 {
+		log.Printf("Retention: deleted %d expired objects", deletedCount)
+	}
+	return nil
 }
 
-// formatBytes formats bytes as human-readable string
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
+

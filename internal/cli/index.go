@@ -1,15 +1,20 @@
 package cli
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/esignoretti/ds3backup/internal/config"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
 // indexCmd represents the index command
@@ -141,11 +146,92 @@ Note: This can take a while for large backups.`,
 
 		fmt.Printf("Found %d objects in S3\n", len(objects))
 
-		// TODO: Implement actual rebuild logic
-		// For now, just show what we found
-		fmt.Println("\n⚠️  Index rebuild not yet fully implemented.")
-		fmt.Println("    Local index will be rebuilt on next backup run.")
-		
+		// Collect batch manifests and individual file objects
+		var manifests []string      // S3 keys of manifest files
+		var fileObjects []string    // S3 keys of individual file objects
+
+		for _, objKey := range objects {
+			if strings.HasSuffix(objKey, "-manifest.json.enc") {
+				manifests = append(manifests, objKey)
+			} else if strings.Contains(objKey, "/files/") {
+				fileObjects = append(fileObjects, objKey)
+			}
+		}
+
+		totalRestored := 0
+
+		// Process batch manifests
+		fmt.Printf("Found %d batch manifest(s)\n", len(manifests))
+		for _, manifestKey := range manifests {
+			data, err := s3Client.GetObject(cmd.Context(), manifestKey)
+			if err != nil {
+				log.Printf("WARNING: Failed to download manifest %s: %v", manifestKey, err)
+				continue
+			}
+
+			var manifest models.BatchManifest
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				log.Printf("WARNING: Failed to parse manifest %s: %v", manifestKey, err)
+				continue
+			}
+
+			for _, fileRef := range manifest.Files {
+				entry := &models.FileEntry{
+					Path:          fileRef.Path,
+					Size:          fileRef.Size,
+					Hash:          fileRef.Hash,
+					JobID:         jobID,
+					S3Key:         fmt.Sprintf("backups/%s/batches/%s.enc", jobID, manifest.BatchID),
+					IsInBatch:     true,
+					BatchID:       manifest.BatchID,
+					OffsetInBatch: fileRef.OffsetInBatch,
+					LengthInBatch: fileRef.LengthInBatch,
+					BackupTime:    manifest.CreatedAt,
+				}
+				if err := idxDB.SaveEntry(entry); err != nil {
+					log.Printf("WARNING: Failed to save entry for %s: %v", fileRef.Path, err)
+					continue
+				}
+				totalRestored++
+			}
+		}
+
+		// Process individual file objects
+		fmt.Printf("Found %d individual file object(s)\n", len(fileObjects))
+		for _, fileKey := range fileObjects {
+			// Extract hash from key: backups/<jobID>/files/<hash>.enc
+			parts := strings.Split(fileKey, "/")
+			if len(parts) < 4 {
+				continue
+			}
+			hashHex := strings.TrimSuffix(parts[len(parts)-1], ".enc")
+			hash, err := hex.DecodeString(hashHex)
+			if err != nil {
+				log.Printf("WARNING: Failed to decode hash from %s: %v", fileKey, err)
+				continue
+			}
+
+			// Create a minimal FileEntry — we know the S3 key and hash.
+			// Full metadata (path, size, modTime) would require downloading+decrypting
+			// which is too expensive. These placeholder entries let the
+			// index serve as a reference for restore operations.
+			entry := &models.FileEntry{
+				Path:      fmt.Sprintf("(unknown) - %x", hash),
+				Hash:      hash,
+				JobID:     jobID,
+				S3Key:     fileKey,
+				IsInBatch: false,
+				BackupTime: time.Now(),
+			}
+			if err := idxDB.SaveEntry(entry); err != nil {
+				log.Printf("WARNING: Failed to save entry for %s: %v", fileKey, err)
+				continue
+			}
+			totalRestored++
+		}
+
+		fmt.Printf("\n✓ Index rebuilded: %d entries restored from S3\n", totalRestored)
+
 		return nil
 	},
 }

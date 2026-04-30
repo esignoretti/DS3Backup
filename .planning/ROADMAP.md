@@ -8,11 +8,12 @@ From a CLI-only secure backup tool to a full-featured backup solution with sched
 
 **Phase Numbering:**
 - Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+- Decimal phases (1.5, 2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation & Restore** — Core backup/recovery CLI, encryption, S3 integration, restore pipeline, disaster recovery
+- [x] **Phase 1.5: Refactor Backup & Restore** (INSERTED) — Tech debt, bugs, performance, missing features in backup/restore pipeline ✅ Complete
 - [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon
 - [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
@@ -41,6 +42,32 @@ Delivered:
 - Disaster recovery: init --rebuild, tar.gz archive + SHA256 verification
 - CLI: index show/rebuild/clear, s3 lifecycle/ls/check-object-lock
 </details>
+
+### Phase 1.5: Refactor Backup & Restore (INSERTED)
+**Goal**: Fix all documented tech debt, bugs, and missing features in the backup and restore pipeline
+**Depends on**: Phase 1 (codebase to refactor)
+**Requirements**: REFACTOR-01, REFACTOR-02, REFACTOR-03
+**Success Criteria** (what must be TRUE):
+  1. Duplicate disaster recovery backup call removed
+  2. Object Lock mode from job config is respected for uploads (not hardcoded GOVERNANCE)
+  3. Retention policy actually deletes expired objects
+  4. BadgerDB v3 dependency removed
+  5. Restore worker patterns consolidated into shared pipeline (~400 fewer lines)
+  6. Formatting utilities centralized in shared package
+  7. RebuildEngine stubs removed
+  8. Config not saved with updated LastRun on failed backup
+  9. VERSION files synchronized to 0.0.7
+  10. S3 lifecycle API no longer a stub — real Put/GetBucketLifecycleConfiguration
+  11. Index rebuild actually works — scans S3 manifests, reconstructs index
+  12. Batch uploads use Object Lock
+  13. macOS BadgerDB lock issue documented as accepted
+
+**Plans**: 3 plans
+
+Plans:
+- [x] 1.5-01-PLAN.md — Bug fixes, deps, formatting consolidation, VERSION
+- [x] 1.5-02-PLAN.md — S3 lifecycle API, retention enforcement, batch Object Lock
+- [x] 1.5-03-PLAN.md — Restore pipeline refactor, stub removal, index rebuild
 
 ### Phase 2: Scheduling & Server
 **Goal**: Daemon-mode backup with cron scheduling, HTTP API for programmatic control, and system tray integration
@@ -89,11 +116,12 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 → 1.5 → 2 → 3 → 4
 
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
+| 1.5. Refactor Backup & Restore | 3/3 executed | ✅ Complete | 2026-04-30 |
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
 | 3. Desktop UI | 3 plans | ✅ Complete | 2026-04-29 |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |

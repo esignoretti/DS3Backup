@@ -171,50 +171,6 @@ func LoadEncryptionSalt(ctx context.Context, s3client *s3client.Client) ([]byte,
 	return salt, nil
 }
 
-// Simple downloader for rebuild (no complex index reconstruction needed)
-type RebuildEngine struct {
-	s3client *s3client.Client
-}
-
-// NewRebuildEngine creates a simple rebuild engine
-func NewRebuildEngine(s3client *s3client.Client) *RebuildEngine {
-	return &RebuildEngine{
-		s3client: s3client,
-	}
-}
-
-// RebuildIndex is no longer needed - entire .ds3backup is restored as a whole
-// This method is kept for API compatibility but does nothing
-func (e *RebuildEngine) RebuildIndex(ctx context.Context, job JobMetadata) error {
-	// Index is already restored as part of the full .ds3backup archive
-	return nil
-}
-
-// JobMetadata represents job configuration (kept for compatibility)
-type JobMetadata struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	SourcePath        string `json:"sourcePath"`
-	RetentionDays     int    `json:"retentionDays"`
-	ObjectLockMode    string `json:"objectLockMode"`
-	EncryptedPassword string `json:"encryptedPassword,omitempty"`
-}
-
-// IsRetired checks if a job has been marked as retired (not used in new approach)
-func (e *RebuildEngine) IsRetired(ctx context.Context, jobID string) (bool, error) {
-	return false, nil
-}
-
-// DiscoverJobs scans S3 and returns list of backup jobs (not used in new approach)
-func (e *RebuildEngine) DiscoverJobs(ctx context.Context) ([]JobMetadata, error) {
-	return nil, nil
-}
-
-// downloadJobMetadata downloads job metadata (not used in new approach)
-func (e *RebuildEngine) downloadJobMetadata(ctx context.Context, jobID string) (JobMetadata, error) {
-	return JobMetadata{}, nil
-}
-
 // SaveJobMetadata encrypts and uploads job metadata to S3
 func SaveJobMetadata(ctx context.Context, s3client *s3client.Client, job models.BackupJob, masterPassword string) error {
 	// Encrypt password with master password if provided
@@ -227,7 +183,14 @@ func SaveJobMetadata(ctx context.Context, s3client *s3client.Client, job models.
 		}
 	}
 
-	metadata := JobMetadata{
+	metadata := struct {
+		ID                string `json:"id"`
+		Name              string `json:"name"`
+		SourcePath        string `json:"sourcePath"`
+		RetentionDays     int    `json:"retentionDays"`
+		ObjectLockMode    string `json:"objectLockMode"`
+		EncryptedPassword string `json:"encryptedPassword,omitempty"`
+	}{
 		ID:                job.ID,
 		Name:              job.Name,
 		SourcePath:        job.SourcePath,

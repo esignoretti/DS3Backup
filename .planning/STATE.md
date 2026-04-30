@@ -5,29 +5,31 @@
 See: .planning/PROJECT.md (not yet created)
 
 **Core value:** Provide a secure, S3-only backup solution with client-side encryption, scheduling, and an intuitive interface
-**Current focus:** Phase 3 — Desktop UI
+**Current focus:** Phase 1.5 — Refactor Backup & Restore
 
 ## Current Position
 
-Phase: 3 of 4 (Desktop UI)
-Plan: 3 of 3 in current phase (03-03-PLAN.md complete)
-Status: Complete, 3 of 3 plans done
-Last activity: 2026-04-29 — Executed Phase 3 (Desktop UI): API layer, dashboard SPA, tray integration
+Phase: 1.5 of 5 (Refactor Backup & Restore) — INSERTED
+Plan: 3 of 3 in current phase
+Status: Complete
+Last activity: 2026-04-30 — All 3 Phase 1.5 plans executed
 
-Progress: [████████░░] 80%
+Progress: [████████░░] 50% (overall project)
+Note: Phase 1.5 complete. Phase 2 complete. Phase 3 complete. Next: Phase 4.
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: ~3m 45s
-- Total execution time: ~12m
+- Total plans completed: 10
+- Average duration: ~5m
+- Total execution time: ~35m
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | N/A |
+| 1.5. Refactor Backup & Restore | 3/3 | ✅ Complete | ~15m |
 | 2. Scheduling & Server | 4/4 | ✅ Complete | ~7m 15s |
 | 3. Desktop UI | 3/3 | ✅ Complete | ~4m |
 
@@ -35,18 +37,23 @@ Progress: [████████░░] 80%
 
 ### Decisions
 
-Key design decisions for Phase 2:
-- D-01: Use `github.com/robfig/cron/v3` for cron expression parsing and scheduling
-- D-02: Use Go standard library `net/http` for the REST API (no external framework)
-- D-03: API binds to 127.0.0.1 only (localhost) for security
-- D-04: Use `github.com/getlantern/systray` for macOS system tray integration
-- D-05: Use macOS LaunchAgent plist for auto-start-on-login
-- D-06: Daemon stores PID at `~/.ds3backup/daemon.pid` for PID-based status detection
-- D-07: Use Go 1.22+ ServeMux path parameters ({id} syntax) instead of manual path parsing
-- D-08: Sanitize job responses via BackupJobWithStatus to exclude EncryptionPassword from JSON output
-- D-09: Return HTTP 202 Accepted for async backup triggers (non-blocking)
-- D-10: daemon stop command tries API stop first, falls back to SIGTERM via PID
-- D-11: Desktop notifications use platform-specific APIs (osascript/notify-send)
+Key design decisions for Phase 2 (previous):
+- D-01 through D-11: (See Phase 2 context — completed)
+
+Key design decisions for Phase 1.5 (Refactor Backup & Restore):
+- D-1.5-01: Remove duplicate DR backup call (engine.go line 252-259)
+- D-1.5-02: Use `mode` parameter instead of hardcoded "GOVERNANCE" in PutObjectWithLock
+- D-1.5-03: Implement direct S3 deletion in applyRetention for GOVERNANCE mode
+- D-1.5-04: Remove badger/v3 dependency from go.mod
+- D-1.5-05: Extract shared runRestorePipeline for restore worker pattern consolidation
+- D-1.5-06: Centralize formatBytes/formatDuration in internal/util/format.go
+- D-1.5-07: Remove obsolete RebuildEngine stubs
+- D-1.5-08: Only save config with updated LastRun when err == nil
+- D-1.5-09: Use version.go constant as source of truth (0.0.7)
+- D-1.5-10: Implement real PutBucketLifecycleConfiguration/GetBucketLifecycleConfiguration
+- D-1.5-11: Implement index rebuild from S3 batch manifests
+- D-1.5-12: Use PutObjectWithLock in BatchBuilder.Upload
+- D-1.5-13: Accept macOS BadgerDB lock issue (documented)
 
 Key design decisions for Phase 3:
 - D-12: HistoryProvider is passed as non-pointer interface (nil means no provider)
@@ -59,11 +66,22 @@ Key design decisions for Phase 3:
 
 ### Pending Todos
 
-None.
+| Priority | Item | Phase | Status |
+|----------|------|-------|--------|
+| High | Execute Phase 1.5 Plan 01 — Bug fixes, deps, formatting | 1.5 | ✅ Done |
+| High | Execute Phase 1.5 Plan 02 — Lifecycle, retention, batch Object Lock | 1.5 | ✅ Done |
+| Medium | Execute Phase 1.5 Plan 03 — Restore refactor, stubs, index rebuild | 1.5 | ✅ Done |
 
 ### Blockers/Concerns
 
 None.
+
+### Phase 1.5 Execution Summary
+
+All 3 plans executed successfully across 3 waves:
+- **Plan 01**: Bug fixes (DR call, ObjectLock mode, config save), badger/v3 confirmation, VERSION sync, formatting consolidation
+- **Plan 02**: Real S3 lifecycle API, retention enforcement, batch Object Lock
+- **Plan 03**: Restore pipeline refactor (~118 lines saved), RebuildEngine stub removal, index rebuild from S3
 
 ## Deferred Items
 
@@ -73,6 +91,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-29 (execution session)
-Stopped at: Completed Phase 3 (Desktop UI) — 3 plans, all tasks executed
-Resume file: Execute `/gsd-execute-phase 04` next
+Last session: 2026-04-30 (execution session)
+Stopped at: Phase 1.5 fully executed (3/3 plans complete). Phase 2 and Phase 3 also complete.
+Resume file: `/gsd-next` to advance to next phase

@@ -131,10 +131,12 @@ Example:
 
 		fmt.Println() // New line after progress
 
-		// Update job in config
-		now := time.Now()
-		job.LastRun = &now
-		cfg.SaveConfig()
+		// Only update config on success
+		if err == nil {
+			now := time.Now()
+			job.LastRun = &now
+			cfg.SaveConfig()
+		}
 
 		// Output results
 		if jsonOutput {

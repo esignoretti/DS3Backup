@@ -13,7 +13,6 @@ import (
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
-// handleStatus handles GET /api/v1/status.
 func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	uptime := time.Since(s.startTime).Round(time.Second).String()
@@ -30,19 +29,16 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleStart handles POST /api/v1/start.
 func (s *APIServer) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.runner.Start()
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 }
 
-// handleStop handles POST /api/v1/stop.
 func (s *APIServer) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.runner.Stop()
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
-// handleListJobs handles GET /api/v1/jobs.
 func (s *APIServer) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	jobs := s.jobManager.GetAllJobs()
 	sanitized := make([]BackupJobWithStatus, 0, len(jobs))
@@ -52,7 +48,6 @@ func (s *APIServer) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, JobListResponse{Jobs: sanitized})
 }
 
-// handleGetJob handles GET /api/v1/jobs/{id}.
 func (s *APIServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
 	job := s.jobManager.GetJob(jobID)
@@ -69,7 +64,6 @@ func (s *APIServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCreateJob handles POST /api/v1/jobs.
 func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	var req CreateJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -80,7 +74,15 @@ func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "name, sourcePath, and password are required")
 		return
 	}
-	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, req.CronExpr)
+	retentionDays := req.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	objectLockMode := req.ObjectLockMode
+	if objectLockMode == "" {
+		objectLockMode = "NONE"
+	}
+	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, req.CronExpr, retentionDays, objectLockMode)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -88,20 +90,14 @@ func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, sanitizeJob(job))
 }
 
-// handleRunBackup handles POST /api/v1/backup/run/{id}.
 func (s *APIServer) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
-
-	// Validate the job exists
 	job := s.jobManager.GetJob(jobID)
 	if job == nil {
 		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
 		return
 	}
-
-	// Trigger async backup run
 	s.runner.RunJob(jobID)
-
 	s.writeJSON(w, http.StatusAccepted, BackupTriggerResponse{
 		JobID:     jobID,
 		Triggered: true,
@@ -109,18 +105,67 @@ func (s *APIServer) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetJobHistory handles GET /api/v1/jobs/{id}/history.
-func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) {
+func (s *APIServer) handlePatchJob(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
-
-	// Validate the job exists
 	job := s.jobManager.GetJob(jobID)
 	if job == nil {
 		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
 		return
 	}
 
-	// Get limit from query param (default 20)
+	var req struct {
+		CronExpr *string `json:"cronExpr"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.CronExpr != nil {
+		job.CronExpr = *req.CronExpr
+		job.ScheduleEnabled = *req.CronExpr != ""
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *APIServer) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+
+	job := s.jobManager.GetJob(jobID)
+	if job == nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+		return
+	}
+
+	var req DeleteJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Password == "" {
+		s.writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	if err := s.jobManager.DeleteJob(jobID, req.Password, req.Purge); err != nil {
+		s.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+
+	job := s.jobManager.GetJob(jobID)
+	if job == nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+		return
+	}
+
 	limit := 20
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 && parsed <= 100 {
@@ -128,7 +173,6 @@ func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Use history provider if available
 	if s.historyProvider == nil {
 		s.writeJSON(w, http.StatusOK, HistoryResponse{
 			JobID: jobID,
@@ -153,7 +197,6 @@ func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleGetLogs handles GET /api/v1/logs.
 func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	logPath := s.logPath
 	if logPath == "" {
@@ -171,7 +214,6 @@ func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return last 200 lines
 	lines := strings.Split(string(data), "\n")
 	if len(lines) > 200 {
 		lines = lines[len(lines)-200:]
@@ -179,4 +221,44 @@ func (s *APIServer) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(strings.Join(lines, "\n")))
+}
+
+func (s *APIServer) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		home, _ := os.UserHomeDir()
+		path = home
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("cannot read directory: %s", err.Error()))
+		return
+	}
+
+	var dirs []string
+	var files []string
+	for _, e := range entries {
+		name := e.Name()
+		if name[0] == '.' {
+			continue
+		}
+		if e.IsDir() {
+			dirs = append(dirs, name)
+		} else {
+			files = append(files, name)
+		}
+	}
+
+	parent := filepath.Dir(path)
+	if path == "/" {
+		parent = ""
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":   path,
+		"parent": parent,
+		"dirs":   dirs,
+		"files":  files,
+	})
 }

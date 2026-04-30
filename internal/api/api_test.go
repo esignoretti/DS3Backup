@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,16 +38,44 @@ func (m *mockJobManager) GetJob(jobID string) *models.BackupJob {
 	return m.jobs[jobID]
 }
 
-func (m *mockJobManager) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
-	return &models.BackupJob{ID: "new-job", Name: name}, nil
-}
-
 func (m *mockJobManager) GetAllJobs() []models.BackupJob {
 	result := make([]models.BackupJob, 0, len(m.jobs))
 	for _, j := range m.jobs {
 		result = append(result, *j)
 	}
 	return result
+}
+
+func (m *mockJobManager) CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
+	job := &models.BackupJob{
+		ID:             "new-job",
+		Name:           name,
+		SourcePath:     source,
+		RetentionDays:  retentionDays,
+		ObjectLockMode: objectLockMode,
+	}
+	m.jobs["new-job"] = job
+	return job, nil
+}
+
+func (m *mockJobManager) RemoveJob(jobID string) bool {
+	if _, ok := m.jobs[jobID]; ok {
+		delete(m.jobs, jobID)
+		return true
+	}
+	return false
+}
+
+func (m *mockJobManager) DeleteJob(jobID, password string, purge bool) error {
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+	if job.EncryptionPassword != password {
+		return fmt.Errorf("incorrect encryption password")
+	}
+	delete(m.jobs, jobID)
+	return nil
 }
 
 // newTestServer creates an APIServer with mock dependencies for testing.

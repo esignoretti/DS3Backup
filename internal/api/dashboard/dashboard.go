@@ -1,8 +1,18 @@
 package dashboard
 
-import "embed"
+import (
+	"embed"
+	"io/fs"
+)
 
-// Content holds the embedded dashboard static files.
-//
 //go:embed index.html
-var Content embed.FS
+var dashboardFiles embed.FS
+
+// GetDashboardFS returns the embedded filesystem with the dashboard HTML.
+func GetDashboardFS() fs.FS {
+	f, err := fs.Sub(dashboardFiles, ".")
+	if err != nil {
+		return nil
+	}
+	return f
+}

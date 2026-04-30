@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -22,7 +23,9 @@ type BackupRunner interface {
 type JobManager interface {
 	GetJob(jobID string) *models.BackupJob
 	GetAllJobs() []models.BackupJob
-	CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error)
+	CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error)
+	RemoveJob(jobID string) bool
+	DeleteJob(jobID, password string, purge bool) error
 }
 
 // BackupJobWithStatus is a sanitized version of BackupJob with
@@ -36,15 +39,32 @@ type BackupJobWithStatus struct {
 	Enabled         bool       `json:"enabled"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	LastRun         *time.Time `json:"lastRun,omitempty"`
-	NextRun         time.Time  `json:"nextRun"`
+	NextRun         time.Time  `json:"nextRun,omitempty"`
 	LastError       string     `json:"lastError,omitempty"`
 	ScheduleEnabled bool       `json:"scheduleEnabled"`
 	CronExpr        string     `json:"cronExpr,omitempty"`
 }
 
+// CreateJobRequest is the JSON body for creating a new job.
+type CreateJobRequest struct {
+	Name           string `json:"name"`
+	SourcePath     string `json:"sourcePath"`
+	Password       string `json:"password"`
+	CronExpr       string `json:"cronExpr,omitempty"`
+	RetentionDays  int    `json:"retentionDays,omitempty"`
+	ObjectLockMode string `json:"objectLockMode,omitempty"`
+}
+
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting
 // the EncryptionPassword field for safe API responses.
 func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
+	nextRun := job.NextRun
+	if nextRun.IsZero() && job.ScheduleEnabled && job.CronExpr != "" {
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if sched, err := parser.Parse(job.CronExpr); err == nil {
+			nextRun = sched.Next(time.Now())
+		}
+	}
 	return BackupJobWithStatus{
 		ID:              job.ID,
 		Name:            job.Name,
@@ -54,7 +74,7 @@ func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 		Enabled:         job.Enabled,
 		CreatedAt:       job.CreatedAt,
 		LastRun:         job.LastRun,
-		NextRun:         job.NextRun,
+		NextRun:         nextRun,
 		LastError:       job.LastError,
 		ScheduleEnabled: job.ScheduleEnabled,
 		CronExpr:        job.CronExpr,
@@ -100,16 +120,14 @@ type HistoryResponse struct {
 	Runs  []*models.BackupRun `json:"runs"`
 }
 
-// CreateJobRequest is the request payload for POST /api/v1/jobs.
-type CreateJobRequest struct {
-	Name       string `json:"name"`
-	SourcePath string `json:"sourcePath"`
-	Password   string `json:"password"`
-	CronExpr   string `json:"cronExpr,omitempty"`
-}
-
 // ErrorResponse is a generic error payload for the API.
 type ErrorResponse struct {
 	Error string `json:"error"`
 	Code  int    `json:"code"`
+}
+
+// DeleteJobRequest is the JSON body for deleting a job.
+type DeleteJobRequest struct {
+	Password string `json:"password"`
+	Purge    bool   `json:"purge"`
 }

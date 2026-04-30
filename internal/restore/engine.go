@@ -40,10 +40,8 @@ func NewRestoreEngine(cfg *config.Config, s3 *s3client.Client, idx *index.IndexD
 
 // Restore executes a restore operation
 func (e *RestoreEngine) Restore(jobID string, opts *models.RestoreOptions) (*models.RestoreResult, error) {
-	ctx := context.Background()
 	startTime := time.Now()
 
-	// Get all file entries from index
 	entries, err := e.indexDB.GetAllEntries(jobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file entries: %w", err)
@@ -53,61 +51,129 @@ func (e *RestoreEngine) Restore(jobID string, opts *models.RestoreOptions) (*mod
 		return &models.RestoreResult{}, nil
 	}
 
-	// Filter by patterns if specified
 	if len(opts.IncludePatterns) > 0 || len(opts.ExcludePatterns) > 0 {
 		entries = e.filterEntries(entries, opts)
 	}
 
-	// Initialize batch extractor
 	e.extractor = NewBatchExtractor(e.s3client, jobID)
 	defer e.extractor.ClearCache()
 
-	// Create downloader
+	result, err := e.runDownloaderPipeline(entries, opts, nil)
+	if err != nil {
+		return result, err
+	}
+	result.Duration = int64(time.Since(startTime).Seconds())
+	return result, nil
+}
+
+// runDownloaderPipeline is the shared restore pipeline used by Restore,
+// RestoreWithProgress, and RestoreEntries. It handles filtering by overwrite
+// rules, dry-run detection, job submission, and result collection.
+//
+// When tracker is non-nil, results are collected in a goroutine with mutex
+// protection and progress updates. When tracker is nil, results are collected
+// synchronously (used by Restore).
+func (e *RestoreEngine) runDownloaderPipeline(entries []*models.FileEntry, opts *models.RestoreOptions, tracker *ProgressTracker) (*models.RestoreResult, error) {
+	// Filter by overwrite rules
+	var filesToRestore []*models.FileEntry
+	var filesSkipped int
+
+	for _, entry := range entries {
+		destPath := e.getDestinationPath(entry, opts)
+		if !opts.Overwrite {
+			if _, err := os.Stat(destPath); err == nil {
+				filesSkipped++
+				continue
+			}
+		}
+		filesToRestore = append(filesToRestore, entry)
+	}
+
+	if opts.DryRun {
+		return &models.RestoreResult{
+			FilesRestored: 0,
+			FilesSkipped:  filesSkipped,
+			BytesRestored: 0,
+		}, nil
+	}
+
+	ctx := context.Background()
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
-		concurrency = 8 // Default
+		concurrency = 8
 	}
 
 	downloader := NewDownloader(concurrency, e.s3client, e.crypto, e.extractor, ctx)
 	downloader.Start()
 
-	// Prepare jobs
-	var totalJobs int
-	var skippedFiles int
-
-	for _, entry := range entries {
-		// Determine destination path
-		destPath := e.getDestinationPath(entry, opts)
-
-		// Check if file exists (skip if not overwrite)
-		if !opts.Overwrite {
-			if _, err := os.Stat(destPath); err == nil {
-				skippedFiles++
-				continue
-			}
-		}
-
-		totalJobs++
-
-		// Submit job
-		job := &Job{
-			Entry:    entry,
-			DestPath: destPath,
-			IsBatch:  entry.IsInBatch,
-			BatchID:  entry.BatchID,
-		}
-		downloader.Submit(job)
-	}
-
-	// Collect results
 	result := &models.RestoreResult{
-		FilesSkipped: skippedFiles,
+		FilesSkipped: filesSkipped,
 		Warnings:     []string{},
 		Errors:       []string{},
 	}
 
+	if tracker != nil {
+		// Collect results with mutex + tracker updates
+		var mu sync.Mutex
+		done := make(chan struct{})
+		go func() {
+			for res := range downloader.Results() {
+				if res.Skipped {
+					mu.Lock()
+					result.FilesSkipped++
+					mu.Unlock()
+					tracker.Update(res.Entry.Path, res.Bytes, true)
+				} else if res.Success {
+					mu.Lock()
+					result.FilesRestored++
+					result.BytesRestored += res.Bytes
+					if len(res.Warnings) > 0 {
+						result.Warnings = append(result.Warnings, res.Warnings...)
+					}
+					mu.Unlock()
+					tracker.Update(res.Entry.Path, res.Bytes, false)
+				} else {
+					mu.Lock()
+					result.FilesFailed++
+					if res.Error != nil {
+						result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+					}
+					mu.Unlock()
+				}
+			}
+			close(done)
+		}()
+
+		// Submit jobs
+		for _, entry := range filesToRestore {
+			destPath := e.getDestinationPath(entry, opts)
+			downloader.Submit(&Job{
+				Entry:    entry,
+				DestPath: destPath,
+				IsBatch:  entry.IsInBatch,
+				BatchID:  entry.BatchID,
+			})
+		}
+
+		downloader.Stop()
+		<-done
+		return result, nil
+	}
+
+	// No tracker: synchronous result collection
+	for _, entry := range filesToRestore {
+		destPath := e.getDestinationPath(entry, opts)
+		downloader.Submit(&Job{
+			Entry:    entry,
+			DestPath: destPath,
+			IsBatch:  entry.IsInBatch,
+			BatchID:  entry.BatchID,
+		})
+	}
+
 	processed := 0
-	for processed < totalJobs {
+	total := len(filesToRestore)
+	for processed < total {
 		select {
 		case res := <-downloader.Results():
 			processed++
@@ -119,7 +185,9 @@ func (e *RestoreEngine) Restore(jobID string, opts *models.RestoreOptions) (*mod
 				result.Warnings = append(result.Warnings, res.Warnings...)
 			} else {
 				result.FilesFailed++
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+				if res.Error != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
+				}
 			}
 		case <-ctx.Done():
 			downloader.Stop()
@@ -128,8 +196,6 @@ func (e *RestoreEngine) Restore(jobID string, opts *models.RestoreOptions) (*mod
 	}
 
 	downloader.Stop()
-	result.Duration = int64(time.Since(startTime).Seconds())
-
 	return result, nil
 }
 
@@ -309,112 +375,20 @@ func matchPattern(path, pattern string) bool {
 }
 // RestoreWithProgress restores files with progress tracking
 func (e *RestoreEngine) RestoreWithProgress(jobID string, opts *models.RestoreOptions, tracker *ProgressTracker) (*models.RestoreResult, error) {
-	// Get all entries
 	entries, err := e.indexDB.GetAllEntries(jobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get index entries: %w", err)
 	}
 
-	// Filter by patterns
 	filtered := e.filterEntries(entries, opts)
 	if len(filtered) == 0 {
 		return nil, fmt.Errorf("no files match the specified patterns")
 	}
 
-	// Prepare restore lists
-	var filesToRestore []*models.FileEntry
-	var filesToSkip []string
+	e.extractor = NewBatchExtractor(e.s3client, jobID)
+	defer e.extractor.ClearCache()
 
-	if !opts.Overwrite && opts.DestinationPath == "" {
-		// Check which files already exist
-		for _, entry := range filtered {
-			destPath := e.getDestinationPath(entry, opts)
-			if _, err := os.Stat(destPath); err == nil {
-				filesToSkip = append(filesToSkip, destPath)
-			} else {
-				filesToRestore = append(filesToRestore, entry)
-			}
-		}
-	} else {
-		filesToRestore = filtered
-	}
-
-	// Calculate total size
-	var totalSize int64
-	for _, entry := range filesToRestore {
-		totalSize += entry.Size
-	}
-
-	if opts.DryRun {
-		return &models.RestoreResult{
-			FilesRestored: 0,
-			FilesSkipped:  len(filesToSkip),
-			BytesRestored: 0,
-		}, nil
-	}
-
-	// Create context
-	ctx := context.Background()
-
-	// Create downloader
-	downloader := NewDownloader(opts.Concurrency, e.s3client, e.crypto, e.extractor, ctx)
-	downloader.Start()
-
-	// Collect results in separate goroutine to prevent deadlock
-	done := make(chan struct{})
-	var mu sync.Mutex
-	result := &models.RestoreResult{
-		FilesRestored: 0,
-		FilesSkipped:  len(filesToSkip),
-		BytesRestored: 0,
-		Warnings:      []string{},
-		Errors:        []string{},
-	}
-
-	go func() {
-		for res := range downloader.Results() {
-			if res.Skipped {
-				mu.Lock()
-				result.FilesSkipped++
-				mu.Unlock()
-				tracker.Update(res.Entry.Path, res.Bytes, true)
-			} else if res.Success {
-				mu.Lock()
-				result.FilesRestored++
-				result.BytesRestored += res.Bytes
-				if len(res.Warnings) > 0 {
-					result.Warnings = append(result.Warnings, res.Warnings...)
-				}
-				mu.Unlock()
-				tracker.Update(res.Entry.Path, res.Bytes, false)
-			} else {
-				mu.Lock()
-				result.FilesFailed++
-				if res.Error != nil {
-					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
-				}
-				mu.Unlock()
-			}
-		}
-		close(done)
-	}()
-
-	// Submit jobs
-	for _, entry := range filesToRestore {
-		destPath := e.getDestinationPath(entry, opts)
-		job := &Job{
-			Entry:    entry,
-			DestPath: destPath,
-			IsBatch:  entry.IsInBatch,
-			BatchID:  entry.BatchID,
-		}
-		downloader.Submit(job)
-	}
-
-	downloader.Stop()
-	<-done // Wait for result collection
-
-	return result, nil
+	return e.runDownloaderPipeline(filtered, opts, tracker)
 }
 
 // RestoreEntries restores specific file entries with progress tracking
@@ -423,102 +397,10 @@ func (e *RestoreEngine) RestoreEntries(jobID string, opts *models.RestoreOptions
 		return &models.RestoreResult{}, nil
 	}
 
-	// Prepare restore lists
-	var filesToRestore []*models.FileEntry
-	var filesToSkip []string
+	e.extractor = NewBatchExtractor(e.s3client, jobID)
+	defer e.extractor.ClearCache()
 
-	if !opts.Overwrite && opts.DestinationPath == "" {
-		// Check which files already exist
-		for _, entry := range entries {
-			destPath := e.getDestinationPath(entry, opts)
-			if _, err := os.Stat(destPath); err == nil {
-				filesToSkip = append(filesToSkip, destPath)
-			} else {
-				filesToRestore = append(filesToRestore, entry)
-			}
-		}
-	} else {
-		filesToRestore = entries
-	}
-
-	// Calculate total size
-	var totalSize int64
-	for _, entry := range filesToRestore {
-		totalSize += entry.Size
-	}
-
-	if opts.DryRun {
-		return &models.RestoreResult{
-			FilesRestored: 0,
-			FilesSkipped:  len(filesToSkip),
-			BytesRestored: 0,
-		}, nil
-	}
-
-	// Create context
-	ctx := context.Background()
-
-	// Create downloader
-	downloader := NewDownloader(opts.Concurrency, e.s3client, e.crypto, e.extractor, ctx)
-	downloader.Start()
-
-	// Result tracking
-	result := &models.RestoreResult{
-		FilesRestored: 0,
-		FilesSkipped:  len(filesToSkip),
-		BytesRestored: 0,
-		Warnings:      []string{},
-		Errors:        []string{},
-	}
-
-	var mu sync.Mutex
-
-	// Collect results in separate goroutine to prevent deadlock
-	done := make(chan struct{})
-	go func() {
-		for res := range downloader.Results() {
-			if res.Skipped {
-				mu.Lock()
-				result.FilesSkipped++
-				mu.Unlock()
-				tracker.Update(res.Entry.Path, res.Bytes, true)
-			} else if res.Success {
-				mu.Lock()
-				result.FilesRestored++
-				result.BytesRestored += res.Bytes
-				if len(res.Warnings) > 0 {
-					result.Warnings = append(result.Warnings, res.Warnings...)
-				}
-				mu.Unlock()
-				tracker.Update(res.Entry.Path, res.Bytes, false)
-			} else {
-				mu.Lock()
-				result.FilesFailed++
-				if res.Error != nil {
-					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
-				}
-				mu.Unlock()
-			}
-		}
-		close(done)
-	}()
-
-	// Submit jobs
-	for _, entry := range filesToRestore {
-		destPath := e.getDestinationPath(entry, opts)
-		job := &Job{
-			Entry:    entry,
-			DestPath: destPath,
-			IsBatch:  entry.IsInBatch,
-			BatchID:  entry.BatchID,
-		}
-		downloader.Submit(job)
-	}
-
-	downloader.Stop()
-	<-done // Wait for result collection to complete
-
-	return result, nil
+	return e.runDownloaderPipeline(entries, opts, tracker)
 }
 
 // ResumeRestore resumes an interrupted restore from saved state

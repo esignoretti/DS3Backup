@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/esignoretti/ds3backup/internal/util"
 )
 
 // ProgressTracker tracks restore progress
@@ -91,24 +93,6 @@ func FormatSpeed(mbps float64) string {
 	return fmt.Sprintf("%.1f MB/s", mbps)
 }
 
-// FormatBytes formats bytes as human-readable string
-func FormatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	units := "KMGTPE"
-	if exp >= len(units) {
-		exp = len(units) - 1
-	}
-	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), units[exp])
-}
-
 // ClearLine clears the current line for progress updates
 func ClearLine() string {
 	return "\r\033[K"
@@ -117,7 +101,7 @@ func ClearLine() string {
 // ProgressLine formats a progress line
 func ProgressLine(percent, processed, total int, bytes int64, speed float64, file string) string {
 	speedStr := FormatSpeed(speed)
-	bytesStr := FormatBytes(bytes)
+	bytesStr := util.FormatBytes(bytes)
 	fileStr := FormatPath(file, 60)
 
 	return fmt.Sprintf("\r[%3d%%] Files: %d/%d, Restored: %s, Speed: %s, Current: %s",
@@ -134,15 +118,6 @@ func SummaryLine(restored, skipped, failed int, duration time.Duration) string {
 	if failed > 0 {
 		parts = append(parts, fmt.Sprintf("Files failed: %d", failed))
 	}
-	parts = append(parts, fmt.Sprintf("Duration: %s", formatDuration(duration)))
+	parts = append(parts, fmt.Sprintf("Duration: %s", util.FormatDuration(duration)))
 	return strings.Join(parts, ", ")
-}
-
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%dm %ds", minutes, seconds)
 }

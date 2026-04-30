@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -385,18 +386,22 @@ func (a *daemonJobManagerAdapter) GetJob(jobID string) *models.BackupJob {
 	return a.cfg.GetJob(jobID)
 }
 
-func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+func (a *daemonJobManagerAdapter) GetAllJobs() []models.BackupJob {
+	return a.cfg.Jobs
+}
+
+func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
 	job := models.BackupJob{
-		ID:                fmt.Sprintf("job_%d", time.Now().UnixNano()),
-		Name:              name,
-		SourcePath:        source,
-		Enabled:           true,
+		ID:                 fmt.Sprintf("job_%d", time.Now().UnixNano()),
+		Name:               name,
+		SourcePath:         source,
+		Enabled:            true,
 		EncryptionPassword: password,
-		RetentionDays:     30,
-		ObjectLockMode:    "NONE",
-		CreatedAt:         time.Now(),
-		CronExpr:          cronExpr,
-		ScheduleEnabled:   cronExpr != "",
+		RetentionDays:      retentionDays,
+		ObjectLockMode:     objectLockMode,
+		CreatedAt:          time.Now(),
+		CronExpr:           cronExpr,
+		ScheduleEnabled:    cronExpr != "",
 	}
 	a.cfg.Jobs = append(a.cfg.Jobs, job)
 	if err := a.cfg.SaveConfig(); err != nil {
@@ -406,8 +411,68 @@ func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr str
 	return &job, nil
 }
 
-func (a *daemonJobManagerAdapter) GetAllJobs() []models.BackupJob {
-	return a.cfg.Jobs
+func (a *daemonJobManagerAdapter) RemoveJob(jobID string) bool {
+	for i, job := range a.cfg.Jobs {
+		if job.ID == jobID {
+			a.cfg.Jobs = append(a.cfg.Jobs[:i], a.cfg.Jobs[i+1:]...)
+			if err := a.cfg.SaveConfig(); err != nil {
+				log.Printf("Warning: failed to save config after removing job %s: %v", jobID, err)
+				return false
+			}
+			log.Printf("Job removed via API: %s (%s)", job.Name, jobID)
+			return true
+		}
+	}
+	return false
+}
+
+func (a *daemonJobManagerAdapter) DeleteJob(jobID, password string, purge bool) error {
+	job := a.cfg.GetJob(jobID)
+	if job == nil {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+
+	if job.EncryptionPassword != password {
+		return fmt.Errorf("incorrect encryption password")
+	}
+
+	if purge {
+		log.Printf("Purging S3 backup files for job %s...", jobID)
+
+		s3Client, err := s3client.NewClient(a.cfg.S3)
+		if err != nil {
+			return fmt.Errorf("failed to create S3 client: %w", err)
+		}
+
+		ctx := context.Background()
+
+		// List and delete backup files
+		prefix := fmt.Sprintf("backups/%s/", jobID)
+		objects, err := s3Client.ListObjects(ctx, prefix)
+		if err != nil {
+			return fmt.Errorf("failed to list S3 objects for job: %w", err)
+		}
+
+		for _, key := range objects {
+			_ = s3Client.DeleteObject(ctx, key, true)
+		}
+
+		// Delete index metadata
+		indexPrefix := fmt.Sprintf(".ds3backup/index/%s/", jobID)
+		indexObjects, _ := s3Client.ListObjects(ctx, indexPrefix)
+		for _, key := range indexObjects {
+			_ = s3Client.DeleteObject(ctx, key, true)
+		}
+
+		// Delete job metadata
+		jobMetaKey := fmt.Sprintf(".ds3backup/jobs/%s/config.json.enc", jobID)
+		_ = s3Client.DeleteObject(ctx, jobMetaKey, true)
+
+		log.Printf("Purged S3 backup files for job %s", jobID)
+	}
+
+	a.RemoveJob(jobID)
+	return nil
 }
 
 // daemonHistoryProvider wraps config to implement api.HistoryProvider.
@@ -420,18 +485,15 @@ func (h *daemonHistoryProvider) GetJobHistory(jobID string, limit int) ([]*model
 	if err != nil {
 		return nil, err
 	}
-
 	indexDir := filepath.Join(configDir, "index", jobID)
 	if _, err := os.Stat(indexDir); os.IsNotExist(err) {
 		return []*models.BackupRun{}, nil
 	}
-
 	idx, err := index.OpenIndexDB(indexDir)
 	if err != nil {
 		return nil, err
 	}
 	defer idx.Close()
-
 	return idx.GetBackupHistory(jobID, limit)
 }
 
