@@ -11,19 +11,21 @@ import (
 )
 
 type BackupJobRunner struct {
-	cfg         *config.Config
-	getJob      func(jobID string) *models.BackupJob
-	runBackupFn func(job *models.BackupJob) (*models.BackupRun, error)
-	jobLocks    map[string]*sync.Mutex
-	lockMu      sync.Mutex
+	cfg           *config.Config
+	getJob        func(jobID string) *models.BackupJob
+	runBackupFn   func(job *models.BackupJob) (*models.BackupRun, error)
+	jobLocks      map[string]*sync.Mutex
+	lockMu        sync.Mutex
+	retryInterval time.Duration
 }
 
 func NewBackupJobRunner(cfg *config.Config, getJob func(string) *models.BackupJob, runBackupFn func(*models.BackupJob) (*models.BackupRun, error)) *BackupJobRunner {
 	return &BackupJobRunner{
-		cfg:         cfg,
-		getJob:      getJob,
-		runBackupFn: runBackupFn,
-		jobLocks:    make(map[string]*sync.Mutex),
+		cfg:           cfg,
+		getJob:        getJob,
+		runBackupFn:   runBackupFn,
+		jobLocks:      make(map[string]*sync.Mutex),
+		retryInterval: 1 * time.Minute,
 	}
 }
 
@@ -82,13 +84,13 @@ func (r *BackupJobRunner) RunJob(jobID string) {
 		if err != nil {
 			lastErr = err
 		} else if run != nil {
-			lastErr = fmt.Errorf(run.Error)
+			lastErr = fmt.Errorf("%s", run.Error)
 		}
 
 		if attempt < maxAttempts-1 {
 			log.Printf("Scheduled backup for job %s failed (attempt %d/%d): %v", jobID, attempt+1, maxAttempts, lastErr)
-			// D-02: Wait 1 minute before next retry
-			time.Sleep(1 * time.Minute)
+			// D-02: Wait before next retry (default 1 minute, short for tests)
+			time.Sleep(r.retryInterval)
 		}
 	}
 
