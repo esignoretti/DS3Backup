@@ -26,10 +26,11 @@ type Config struct {
 
 // DaemonConfig holds daemon mode settings
 type DaemonConfig struct {
-	Enabled           bool  `json:"enabled"`
-	SchedulerInterval int   `json:"schedulerInterval"`
-	APIPort           int   `json:"apiPort"`
-	AutoStart         bool  `json:"autoStart"`
+	Enabled                   bool      `json:"enabled"`
+	SchedulerInterval         int       `json:"schedulerInterval"`
+	APIPort                   int       `json:"apiPort"`
+	AutoStart                 bool      `json:"autoStart"`
+	LastSchedulerCheckpoint   time.Time `json:"lastSchedulerCheckpoint,omitempty"`
 }
 
 // S3Config holds S3 connection details

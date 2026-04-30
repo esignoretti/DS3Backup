@@ -10,20 +10,23 @@ import (
 )
 
 type Scheduler struct {
-	mu       sync.Mutex
-	cron     *cron.Cron
-	entries  map[string][]cron.EntryID
-	interval time.Duration
-	running  bool
-	logger   *log.Logger
+	mu             sync.Mutex
+	cron           *cron.Cron
+	entries        map[string][]cron.EntryID
+	interval       time.Duration
+	running        bool
+	logger         *log.Logger
+	checkpointTime time.Time
+	startTime      time.Time
 }
 
 func NewScheduler(interval time.Duration, logger *log.Logger) *Scheduler {
 	return &Scheduler{
-		cron:     cron.New(cron.WithParser(cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow))),
-		entries:  make(map[string][]cron.EntryID),
-		interval: interval,
-		logger:   logger,
+		cron:           cron.New(cron.WithParser(cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow))),
+		entries:        make(map[string][]cron.EntryID),
+		interval:       interval,
+		logger:         logger,
+		checkpointTime: time.Time{},
 	}
 }
 
@@ -33,8 +36,15 @@ func (s *Scheduler) Start() {
 	if s.running {
 		return
 	}
+	s.startTime = time.Now()
 	s.cron.Start()
 	s.running = true
+	if !s.checkpointTime.IsZero() {
+		elapsed := time.Since(s.checkpointTime)
+		if elapsed > s.interval*2 {
+			s.logger.Printf("Scheduler offline for %v — missed schedule window detected", elapsed)
+		}
+	}
 	s.logger.Println("Scheduler started")
 }
 
@@ -54,6 +64,18 @@ func (s *Scheduler) IsRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.running
+}
+
+func (s *Scheduler) SetCheckpointTime(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checkpointTime = t
+}
+
+func (s *Scheduler) GetCheckpointTime() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checkpointTime
 }
 
 func (s *Scheduler) ScheduleJob(jobID string, cronExprs []string, runner func()) error {
