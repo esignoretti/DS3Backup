@@ -1,6 +1,6 @@
 # DS3 Backup
 
-**Version:** 0.0.7
+**Version:** 0.0.8
 
 **DS3 Backup** is a secure, S3-only backup tool with client-side encryption, designed for simplicity and reliability.
 
