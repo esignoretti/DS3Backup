@@ -96,7 +96,15 @@ func (s *APIServer) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "name, sourcePath, and password are required")
 		return
 	}
-	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, req.CronExpr)
+	retentionDays := req.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	objectLockMode := req.ObjectLockMode
+	if objectLockMode == "" {
+		objectLockMode = "NONE"
+	}
+	job, err := s.jobManager.CreateJob(req.Name, req.SourcePath, req.Password, req.CronExpr, retentionDays, objectLockMode)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return

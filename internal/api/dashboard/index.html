@@ -190,6 +190,18 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
         <label>Schedule (optional cron)</label>
         <input type="text" id="newJobCron" placeholder="e.g. 0 2 * * * (daily at 2am)" />
       </div>
+      <div class="form-group">
+        <label>Retention (days)</label>
+        <input type="number" id="newJobRetention" value="30" min="1" style="width:120px" />
+      </div>
+      <div class="form-group">
+        <label>Object Lock Mode</label>
+        <select id="newJobLockMode" style="width:100%;padding:8px 10px;border:1px solid #1a5276;border-radius:6px;background:#0a192f;color:#e0e0e0;font-size:13px">
+          <option value="NONE">Disabled</option>
+          <option value="GOVERNANCE">Governance</option>
+          <option value="COMPLIANCE">Compliance</option>
+        </select>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="document.getElementById('addJobModal').classList.remove('open')">Cancel</button>
@@ -375,6 +387,7 @@ function createJobCard(job){
     '<div class="job-info-row"><span class="info-label">Schedule</span><span class="info-value">'+(job.scheduleEnabled?formatCron(job.cronExpr):'Manual only')+'</span></div>'+
     '<div class="job-info-row"><span class="info-label">Next Run</span><span class="info-value">'+formatTime(job.nextRun)+'</span></div>'+
     '<div class="job-info-row"><span class="info-label">Retention</span><span class="info-value">'+(job.retentionDays||'—')+' days</span></div>'+
+    '<div class="job-info-row"><span class="info-label">Object Lock</span><span class="info-value">'+(job.objectLockMode||'NONE')+'</span></div>'+
     (job.lastError?'<div class="job-info-row"><span class="info-label" style="color:#ff8a80">Last Error</span><span class="info-value" style="color:#ff8a80">'+escapeHtml(job.lastError)+'</span></div>':'')+
     '<div class="job-actions">'+
     '<button class="btn btn-primary btn-sm" onclick="triggerBackup(\''+job.id+'\')" id="runBtn-'+job.id+'">▶ Run</button>'+
@@ -479,14 +492,14 @@ async function loadLogs(){
 }
 
 async function createJob(){
-  var nm=document.getElementById('newJobName').value.trim(),p=document.getElementById('newJobPath').value.trim(),pw=document.getElementById('newJobPassword').value,cr=document.getElementById('newJobCron').value.trim();
+  var nm=document.getElementById('newJobName').value.trim(),p=document.getElementById('newJobPath').value.trim(),pw=document.getElementById('newJobPassword').value,cr=document.getElementById('newJobCron').value.trim(),rt=parseInt(document.getElementById('newJobRetention').value)||30,lm=document.getElementById('newJobLockMode').value;
   if(!nm){showToast('Job name is required','error');return}if(!p){showToast('Source directory is required','error');return}if(!pw){showToast('Encryption password is required','error');return}
   document.getElementById('addJobModal').classList.remove('open');
   try{
-    var r=await fetch('/api/v1/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,sourcePath:p,password:pw,cronExpr:cr})});
+    var r=await fetch('/api/v1/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,sourcePath:p,password:pw,cronExpr:cr,retentionDays:rt,objectLockMode:lm})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     showToast('Job "'+nm+'" created!','success');
-    document.getElementById('newJobName').value='';document.getElementById('newJobPath').value='';document.getElementById('newJobPassword').value='';document.getElementById('newJobCron').value='';
+    document.getElementById('newJobName').value='';document.getElementById('newJobPath').value='';document.getElementById('newJobPassword').value='';document.getElementById('newJobCron').value='';document.getElementById('newJobRetention').value='30';document.getElementById('newJobLockMode').value='NONE';
     await loadDashboard();
   }catch(e){showToast('Failed: '+e.message,'error')}
 }

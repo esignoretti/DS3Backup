@@ -23,7 +23,7 @@ type BackupRunner interface {
 type JobManager interface {
 	GetJob(jobID string) *models.BackupJob
 	GetAllJobs() []models.BackupJob
-	CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error)
+	CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error)
 	RemoveJob(jobID string) bool
 	// DeleteJob removes a job after verifying password, optionally purging S3 backup files.
 	// Returns an error if the password is wrong, S3 purge fails, or the job is not found.
@@ -49,10 +49,12 @@ type BackupJobWithStatus struct {
 
 // CreateJobRequest is the JSON body for creating a new job.
 type CreateJobRequest struct {
-	Name       string `json:"name"`
-	SourcePath string `json:"sourcePath"`
-	Password   string `json:"password"`
-	CronExpr   string `json:"cronExpr,omitempty"`
+	Name           string `json:"name"`
+	SourcePath     string `json:"sourcePath"`
+	Password       string `json:"password"`
+	CronExpr       string `json:"cronExpr,omitempty"`
+	RetentionDays  int    `json:"retentionDays,omitempty"`
+	ObjectLockMode string `json:"objectLockMode,omitempty"`
 }
 
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting

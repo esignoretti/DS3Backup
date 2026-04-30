@@ -46,11 +46,13 @@ func (m *mockJobManager) GetAllJobs() []models.BackupJob {
 	return result
 }
 
-func (m *mockJobManager) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+func (m *mockJobManager) CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
 	job := &models.BackupJob{
-		ID:         "new-job",
-		Name:       name,
-		SourcePath: source,
+		ID:             "new-job",
+		Name:           name,
+		SourcePath:     source,
+		RetentionDays:  retentionDays,
+		ObjectLockMode: objectLockMode,
 	}
 	m.jobs["new-job"] = job
 	return job, nil

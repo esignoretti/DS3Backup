@@ -378,15 +378,15 @@ func (a *daemonJobManagerAdapter) GetAllJobs() []models.BackupJob {
 	return a.cfg.Jobs
 }
 
-func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr string) (*models.BackupJob, error) {
+func (a *daemonJobManagerAdapter) CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
 	job := models.BackupJob{
 		ID:                 fmt.Sprintf("job_%d", time.Now().UnixNano()),
 		Name:               name,
 		SourcePath:         source,
 		Enabled:            true,
 		EncryptionPassword: password,
-		RetentionDays:      30,
-		ObjectLockMode:     "NONE",
+		RetentionDays:      retentionDays,
+		ObjectLockMode:     objectLockMode,
 		CreatedAt:          time.Now(),
 		CronExpr:           cronExpr,
 		ScheduleEnabled:    cronExpr != "",
