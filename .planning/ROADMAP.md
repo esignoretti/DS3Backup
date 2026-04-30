@@ -13,7 +13,7 @@ From a CLI-only secure backup tool to a full-featured backup solution with sched
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation & Restore** — Core backup/recovery CLI, encryption, S3 integration, restore pipeline, disaster recovery
-- [x] **Phase 1.5: Refactor Backup & Restore** (INSERTED) — Tech debt, bugs, performance, missing features in backup/restore pipeline
+- [x] **Phase 1.5: Refactor Backup & Restore** (INSERTED) — Tech debt, bugs, performance, missing features in backup/restore pipeline ✅ Complete
 - [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon
 - [ ] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
@@ -65,9 +65,9 @@ Delivered:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 1.5-01-PLAN.md — Bug fixes, deps, formatting consolidation, VERSION
-- [ ] 1.5-02-PLAN.md — S3 lifecycle API, retention enforcement, batch Object Lock
-- [ ] 1.5-03-PLAN.md — Restore pipeline refactor, stub removal, index rebuild
+- [x] 1.5-01-PLAN.md — Bug fixes, deps, formatting consolidation, VERSION
+- [x] 1.5-02-PLAN.md — S3 lifecycle API, retention enforcement, batch Object Lock
+- [x] 1.5-03-PLAN.md — Restore pipeline refactor, stub removal, index rebuild
 
 ### Phase 2: Scheduling & Server
 **Goal**: Daemon-mode backup with cron scheduling, HTTP API for programmatic control, and system tray integration
@@ -116,7 +116,7 @@ Phases execute in numeric order: 1 → 1.5 → 2 → 3 → 4
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
-| 1.5. Refactor Backup & Restore | 3/3 planned | 📋 Planned | - |
+| 1.5. Refactor Backup & Restore | 3/3 executed | ✅ Complete | 2026-04-30 |
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
 | 3. Desktop UI | TBD | 📋 Planned | - |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
