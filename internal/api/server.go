@@ -49,9 +49,11 @@ func (s *APIServer) Start() error {
 	}
 	s.mu.Unlock()
 
+	// Capture the server pointer to avoid nil dereference if Stop() clears s.server before this goroutine runs
+	svr := s.server
 	go func() {
 		log.Printf("API server listening on %s", s.Addr())
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := svr.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("API server error: %v", err)
 		}
 	}()

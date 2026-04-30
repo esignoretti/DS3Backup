@@ -46,13 +46,14 @@ func (m *mockJobManager) GetAllJobs() []models.BackupJob {
 	return result
 }
 
-func (m *mockJobManager) CreateJob(name, source, password, cronExpr string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
+func (m *mockJobManager) CreateJob(name, source, password string, cronExprs []string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
 	job := &models.BackupJob{
 		ID:             "new-job",
 		Name:           name,
 		SourcePath:     source,
 		RetentionDays:  retentionDays,
 		ObjectLockMode: objectLockMode,
+		CronExprs:      cronExprs,
 	}
 	m.jobs["new-job"] = job
 	return job, nil
@@ -206,7 +207,7 @@ func TestListJobs_WithJobs(t *testing.T) {
 				CreatedAt:       now,
 				NextRun:         now.Add(1 * time.Hour),
 				ScheduleEnabled: true,
-				CronExpr:        "0 * * * *",
+				CronExprs:       []string{"0 * * * *"},
 			},
 		},
 	}
@@ -261,7 +262,7 @@ func TestGetJob_Found(t *testing.T) {
 				CreatedAt:       now,
 				NextRun:         now.Add(1 * time.Hour),
 				ScheduleEnabled: true,
-				CronExpr:        "0 * * * *",
+				CronExprs:       []string{"0 * * * *"},
 			},
 		},
 	}
@@ -284,8 +285,8 @@ func TestGetJob_Found(t *testing.T) {
 	if !resp.IsScheduled {
 		t.Errorf("expected scheduled=true")
 	}
-	if resp.CronExpr != "0 * * * *" {
-		t.Errorf("expected cronExpr=0 * * * *, got %s", resp.CronExpr)
+	if len(resp.CronExprs) != 1 || resp.CronExprs[0] != "0 * * * *" {
+		t.Errorf("expected CronExprs [\"0 * * * *\"], got %v", resp.CronExprs)
 	}
 
 	// Verify no password leak
@@ -451,7 +452,7 @@ func TestAPIResponseFormat_JobList(t *testing.T) {
 				CreatedAt:       now,
 				NextRun:         now.Add(1 * time.Hour),
 				ScheduleEnabled: true,
-				CronExpr:        "0 * * * *",
+				CronExprs:       []string{"0 * * * *"},
 			},
 		},
 	}
@@ -494,6 +495,11 @@ func TestAPIResponseFormat_JobList(t *testing.T) {
 	// Verify EncryptionPassword is NOT present
 	if _, ok := job["encryptionPassword"]; ok {
 		t.Error("encryptionPassword field should NOT be in job response")
+	}
+
+	// Verify cronExprs field is present (new field)
+	if _, ok := job["cronExprs"]; !ok {
+		t.Error("expected cronExprs field in job response")
 	}
 }
 
@@ -694,5 +700,186 @@ func TestAPIServer_StartStopLifecycle(t *testing.T) {
 
 	if s.IsRunning() {
 		t.Error("expected server not to be running after Stop")
+	}
+}
+
+func TestGetJob_MultipleCronExprs(t *testing.T) {
+	now := time.Now()
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"multi-job": {
+				ID:              "multi-job",
+				Name:            "Multi Schedule Job",
+				SourcePath:      "/tmp/test",
+				RetentionDays:   30,
+				ObjectLockMode:  "GOVERNANCE",
+				Enabled:         true,
+				EncryptionPassword: "secret",
+				CreatedAt:       now,
+				ScheduleEnabled: true,
+				CronExprs:       []string{"0 2 * * *", "0 14 * * *"},
+			},
+		},
+	}
+	s := newTestServer(runner, jm, nil)
+
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/multi-job", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp JobDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.CronExprs) != 2 {
+		t.Fatalf("expected 2 cron expressions, got %d: %v", len(resp.CronExprs), resp.CronExprs)
+	}
+	if resp.CronExprs[0] != "0 2 * * *" {
+		t.Errorf("expected first cronExpr '0 2 * * *', got %s", resp.CronExprs[0])
+	}
+	if resp.CronExprs[1] != "0 14 * * *" {
+		t.Errorf("expected second cronExpr '0 14 * * *', got %s", resp.CronExprs[1])
+	}
+	if !resp.IsScheduled {
+		t.Error("expected scheduled=true")
+	}
+}
+
+func TestCreateJob_BackwardCompatSingleCronExpr(t *testing.T) {
+	runner := &mockRunner{}
+	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
+	s := newTestServer(runner, jm, nil)
+
+	// POST with deprecated single cronExpr field
+	body := `{"name":"test","sourcePath":"/tmp","password":"secret","cronExpr":"0 2 * * *"}`
+	w := executeRequest(s, http.MethodPost, "/api/v1/jobs", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp BackupJobWithStatus
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.CronExprs) != 1 || resp.CronExprs[0] != "0 2 * * *" {
+		t.Errorf("expected CronExprs [\"0 2 * * *\"], got %v", resp.CronExprs)
+	}
+}
+
+func TestCreateJob_UsesCronExprsField(t *testing.T) {
+	runner := &mockRunner{}
+	jm := &mockJobManager{jobs: map[string]*models.BackupJob{}}
+	s := newTestServer(runner, jm, nil)
+
+	// POST with new cronExprs field
+	body := `{"name":"test","sourcePath":"/tmp","password":"secret","cronExprs":["0 2 * * *","0 14 * * *"]}`
+	w := executeRequest(s, http.MethodPost, "/api/v1/jobs", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp BackupJobWithStatus
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.CronExprs) != 2 {
+		t.Fatalf("expected 2 cron expressions, got %d: %v", len(resp.CronExprs), resp.CronExprs)
+	}
+}
+
+func TestPatchJob_UpdateCronExprs(t *testing.T) {
+	now := time.Now()
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"patch-job": {
+				ID:              "patch-job",
+				Name:            "Patch Test",
+				SourcePath:      "/tmp/test",
+				RetentionDays:   30,
+				Enabled:         true,
+				EncryptionPassword: "secret",
+				CreatedAt:       now,
+				ScheduleEnabled: true,
+				CronExprs:       []string{"0 2 * * *"},
+			},
+		},
+	}
+	s := newTestServer(runner, jm, nil)
+
+	// PATCH with new cronExprs
+	body := `{"cronExprs":["30 1 * * *","0 12 * * *"]}`
+	w := executeRequest(s, http.MethodPatch, "/api/v1/jobs/patch-job", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify via GET
+	w = executeRequest(s, http.MethodGet, "/api/v1/jobs/patch-job", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp JobDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.CronExprs) != 2 {
+		t.Fatalf("expected 2 cron expressions after patch, got %d: %v", len(resp.CronExprs), resp.CronExprs)
+	}
+	if resp.CronExprs[0] != "30 1 * * *" {
+		t.Errorf("expected first cronExpr '30 1 * * *', got %s", resp.CronExprs[0])
+	}
+	if resp.CronExprs[1] != "0 12 * * *" {
+		t.Errorf("expected second cronExpr '0 12 * * *', got %s", resp.CronExprs[1])
+	}
+}
+
+func TestPatchJob_BackwardCompatSingleCronExpr(t *testing.T) {
+	now := time.Now()
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"patch-job-2": {
+				ID:              "patch-job-2",
+				Name:            "Patch Test 2",
+				SourcePath:      "/tmp/test",
+				RetentionDays:   30,
+				Enabled:         true,
+				EncryptionPassword: "secret",
+				CreatedAt:       now,
+				ScheduleEnabled: true,
+				CronExprs:       []string{"0 2 * * *"},
+			},
+		},
+	}
+	s := newTestServer(runner, jm, nil)
+
+	// PATCH with deprecated single cronExpr
+	body := `{"cronExpr":"0 5 * * *"}`
+	w := executeRequest(s, http.MethodPatch, "/api/v1/jobs/patch-job-2", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify via GET
+	w = executeRequest(s, http.MethodGet, "/api/v1/jobs/patch-job-2", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp JobDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.CronExprs) != 1 || resp.CronExprs[0] != "0 5 * * *" {
+		t.Errorf("expected CronExprs [\"0 5 * * *\"], got %v", resp.CronExprs)
 	}
 }
