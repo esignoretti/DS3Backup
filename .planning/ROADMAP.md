@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation & Restore** — Core backup/recovery CLI, encryption, S3 integration, restore pipeline, disaster recovery
 - [x] **Phase 1.5: Refactor Backup & Restore** (INSERTED) — Tech debt, bugs, performance, missing features in backup/restore pipeline ✅ Complete
 - [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon ✅ Complete
-- [ ] **Phase 2.5: Advanced Scheduler** (INSERTED) — Retry logic, overlap prevention, missed-schedule catch-up, multi-schedule per job
+- [x] **Phase 2.5: Advanced Scheduler** (INSERTED) — Retry logic, overlap prevention, missed-schedule catch-up, multi-schedule per job ✅ Complete
 - [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore ✅ Complete
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
@@ -105,8 +105,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 2.5-01-PLAN.md — Multi-schedule per job: CronExprs []string, API backward compat, scheduler engine updates
-- [ ] 2.5-02-PLAN.md — Retry & resilience: retry runner, overlap prevention, missed-log, checkpoint persistence, tests
+- [x] 2.5-01-PLAN.md — Multi-schedule per job: CronExprs []string, API backward compat, scheduler engine updates ✅ Done
+- [x] 2.5-02-PLAN.md — Retry & resilience: retry runner, overlap prevention, missed-log, checkpoint persistence, tests ✅ Done
 
 ### Phase 3: Desktop UI (Planned)
 **Goal**: Cross-platform desktop application with progress notifications, backup history visualization, and one-click restore
@@ -143,6 +143,6 @@ Phases execute in numeric order: 1 → 1.5 → 2 → 3 → 4
 | 1. Foundation & Restore | Multiple | ✅ Complete | 2026-04-29 |
 | 1.5. Refactor Backup & Restore | 3/3 executed | ✅ Complete | 2026-04-30 |
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
-| 2.5. Advanced Scheduler | 2 plans | 📋 Planned | - |
+| 2.5. Advanced Scheduler | 2/2 executed | ✅ Complete | 2026-04-30 |
 | 3. Desktop UI | 3 plans | ✅ Complete | 2026-04-29 |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |

@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (not yet created)
 
 **Core value:** Provide a secure, S3-only backup solution with client-side encryption, scheduling, and an intuitive interface
-**Current focus:** Phase 1.5 — Refactor Backup & Restore
+**Current focus:** Phase 2.5 — Advanced Scheduler
 
 ## Current Position
 
-Phase: 1.5 of 5 (Refactor Backup & Restore) — INSERTED
-Plan: 3 of 3 in current phase
+Phase: 2.5 of 5 (Advanced Scheduler) — INSERTED
+Plan: 2 of 2 in current phase
 Status: Complete
-Last activity: 2026-04-30 — All 3 Phase 1.5 plans executed
+Last activity: 2026-04-30 — All 2 Phase 2.5 plans executed
 
-Progress: [████████░░] 50% (overall project)
-Note: Phase 1.5 complete. Phase 2 complete. Phase 3 complete. Next: Phase 4.
+Progress: [████████░░] 55% (overall project)
+Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. Next: Phase 4.
 
 ## Performance Metrics
 
@@ -31,6 +31,7 @@ Note: Phase 1.5 complete. Phase 2 complete. Phase 3 complete. Next: Phase 4.
 | 1. Foundation & Restore | Multiple | ✅ Complete | N/A |
 | 1.5. Refactor Backup & Restore | 3/3 | ✅ Complete | ~15m |
 | 2. Scheduling & Server | 4/4 | ✅ Complete | ~7m 15s |
+| 2.5. Advanced Scheduler | 2/2 | ✅ Complete | ~10m |
 | 3. Desktop UI | 3/3 | ✅ Complete | ~4m |
 
 ## Accumulated Context
@@ -71,10 +72,33 @@ Key design decisions for Phase 3:
 | High | Execute Phase 1.5 Plan 01 — Bug fixes, deps, formatting | 1.5 | ✅ Done |
 | High | Execute Phase 1.5 Plan 02 — Lifecycle, retention, batch Object Lock | 1.5 | ✅ Done |
 | Medium | Execute Phase 1.5 Plan 03 — Restore refactor, stubs, index rebuild | 1.5 | ✅ Done |
+| High | Execute Phase 2.5 Plan 01 — Multi-schedule per job | 2.5 | ✅ Done |
+| High | Execute Phase 2.5 Plan 02 — Retry & resilience | 2.5 | ✅ Done |
+
+### Phase 2.5 Execution Summary
+
+All 2 plans executed successfully across 2 waves:
+- **Plan 01**: Multi-schedule per job — `CronExprs []string` replaces `CronExpr string` across models, scheduler, API, daemon. 11 new/updated tests.
+- **Plan 02**: Retry & resilience — 3-attempt retry with 1-min intervals, per-job overlap prevention (`TryLock`), panic recovery, missed-schedule logging, checkpoint persistence. 11 new tests.
 
 ### Blockers/Concerns
 
 None.
+
+Key design decisions for Phase 2.5 (Advanced Scheduler):
+- D-01: Failed scheduled backups retry 3 total attempts
+- D-02: Retry interval fixed at 1 minute between attempts
+- D-03: Final failure sets job.LastError, no further retries
+- D-04: Panic recovered gracefully, treated as failure
+- D-05: Overlapping occurrence SKIPPED (next run at next cron tick)
+- D-06: Per-job mutex tracks run-in-progress before firing schedule
+- D-07: On restart, missed schedules logged but NOT executed
+- D-08: Scheduler persists last-checkpoint time for missed-schedule logging
+- D-09: Different jobs run fully in parallel
+- D-10: Single job cannot overlap with itself
+- D-11: Jobs support list of cron expressions (CronExprs []string)
+- D-12: Each expression fires same backup pipeline (no per-expr options)
+- D-13: CronExpr becomes CronExprs []string (breaking model change)
 
 ### Phase 1.5 Execution Summary
 
