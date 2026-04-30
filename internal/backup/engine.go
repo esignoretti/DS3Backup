@@ -245,7 +245,10 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 
 	// Step 7: Apply retention
 	log.Println("Applying retention policy...")
-	e.applyRetention(job)
+	ctxRetention := context.Background()
+	if err := e.applyRetention(ctxRetention, job); err != nil {
+		log.Printf("WARNING: Retention policy failed: %v", err)
+	}
 
 	run.Status = "completed"
 	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, util.FormatBytes(run.BytesUploaded))
@@ -382,24 +385,50 @@ func (e *BackupEngine) createDisasterRecoveryBackup() error {
 	return nil
 }
 
-// applyRetention marks old backups for deletion
-func (e *BackupEngine) applyRetention(job *models.BackupJob) {
+// applyRetention deletes expired backup objects beyond the retention period
+func (e *BackupEngine) applyRetention(ctx context.Context, job *models.BackupJob) error {
 	cutoff := time.Now().AddDate(0, 0, -job.RetentionDays)
 
-	// Get old backup runs
 	runs, err := e.indexDB.GetBackupHistory(job.ID, 1000)
 	if err != nil {
-		log.Printf("WARNING: Failed to get backup history: %v", err)
-		return
+		return fmt.Errorf("failed to get backup history: %w", err)
 	}
 
-	// Mark expired runs (S3 lifecycle will handle actual deletion)
+	var deletedCount int
 	for _, run := range runs {
-		if run.RunTime.Before(cutoff) {
-			log.Printf("Marking backup from %s for deletion (expired)", run.RunTime.Format(time.RFC3339))
-			// In production: mark objects for deletion in S3
+		if !run.RunTime.Before(cutoff) {
+			continue
+		}
+
+		log.Printf("Applying retention for backup from %s", run.RunTime.Format(time.RFC3339))
+
+		if job.ObjectLockMode == "COMPLIANCE" {
+			log.Printf("WARNING: Cannot delete COMPLIANCE-locked backup from %s within retention period", run.RunTime.Format(time.RFC3339))
+			continue
+		}
+
+		// Get entries for this run
+		entries, err := e.indexDB.GetEntriesForRun(job.ID, run.RunTime)
+		if err != nil {
+			log.Printf("WARNING: Failed to get entries for run %s: %v", run.RunTime.Format(time.RFC3339), err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.S3Key != "" {
+				if err := e.s3client.DeleteObject(ctx, entry.S3Key, true); err != nil {
+					log.Printf("WARNING: Failed to delete %s: %v", entry.S3Key, err)
+					continue
+				}
+				deletedCount++
+			}
 		}
 	}
+
+	if deletedCount > 0 {
+		log.Printf("Retention: deleted %d expired objects", deletedCount)
+	}
+	return nil
 }
 
 
