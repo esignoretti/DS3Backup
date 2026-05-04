@@ -9,13 +9,13 @@ See: .planning/PROJECT.md (not yet created)
 
 ## Current Position
 
-Phase: 2.5 of 5 (Advanced Scheduler) — INSERTED
+Phase: 3.1 of 5 (UI Scheduling Update) — INSERTED
 Plan: 2 of 2 in current phase
 Status: Complete
-Last activity: 2026-04-30 — All 2 Phase 2.5 plans executed
+Last activity: 2026-05-04 — All 2 Phase 3.1 plans executed
 
-Progress: [████████░░] 55% (overall project)
-Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. Next: Phase 4.
+Progress: [██████████] 60% (overall project)
+Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. Phase 3.1 complete. Next: Phase 4.
 
 ## Performance Metrics
 
@@ -33,6 +33,7 @@ Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete
 | 2. Scheduling & Server | 4/4 | ✅ Complete | ~7m 15s |
 | 2.5. Advanced Scheduler | 2/2 | ✅ Complete | ~10m |
 | 3. Desktop UI | 3/3 | ✅ Complete | ~4m |
+| 3.1. UI Scheduling Update | 2/2 | ✅ Complete | ~5m |
 
 ## Accumulated Context
 
@@ -75,11 +76,11 @@ Key design decisions for Phase 3:
 | High | Execute Phase 2.5 Plan 01 — Multi-schedule per job | 2.5 | ✅ Done |
 | High | Execute Phase 2.5 Plan 02 — Retry & resilience | 2.5 | ✅ Done |
 
-### Phase 2.5 Execution Summary
+### Phase 3.1 Execution Summary
 
-All 2 plans executed successfully across 2 waves:
-- **Plan 01**: Multi-schedule per job — `CronExprs []string` replaces `CronExpr string` across models, scheduler, API, daemon. 11 new/updated tests.
-- **Plan 02**: Retry & resilience — 3-attempt retry with 1-min intervals, per-job overlap prevention (`TryLock`), panic recovery, missed-schedule logging, checkpoint persistence. 11 new tests.
+All 2 plans executed successfully:
+- **Plan 01**: API layer — RetryCount/NextRetryTime fields on BackupJobWithStatus, dual cron parser (standard + enhanced with Descriptor) for @every/@daily/@hourly support, 3 new tests
+- **Plan 02**: Dashboard SPA — formatCronExprs replaces formatCron, multi-schedule display, @every interval labels, retry info row, comma-separated cronExprs editing in add-job and reschedule
 
 ### Blockers/Concerns
 

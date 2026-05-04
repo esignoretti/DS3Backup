@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon ✅ Complete
 - [x] **Phase 2.5: Advanced Scheduler** (INSERTED) — Retry logic, overlap prevention, missed-schedule catch-up, multi-schedule per job ✅ Complete
 - [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore ✅ Complete
-- [ ] **Phase 3.1: UI Scheduling Update** (INSERTED) — Dashboard now shows multi-schedule, retry info, interval expressions; API exposes retry fields ✅ Planned
+- [x] **Phase 3.1: UI Scheduling Update** (INSERTED) — Dashboard now shows multi-schedule, retry info, interval expressions; API exposes retry fields ✅ Complete
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
 ## Phase Details
@@ -124,7 +124,7 @@ Plans:
 - [x] 03-02-PLAN.md — Web dashboard SPA: single-file HTML+CSS+JS dashboard served at GET /
 - [x] 03-03-PLAN.md — Tray wiring + notifications: open dashboard in browser, per-job backup items, notification integration
 
-### Phase 3.1: UI Scheduling Update (INSERTED)
+### Phase 3.1: UI Scheduling Update (SHIPPED)
 **Goal**: Update the desktop dashboard UI to expose advanced scheduling features — multi-schedule display, retry state visibility, interval expression support (@every), and proper multi-schedule editing in the add-job and reschedule flows.
 **Depends on**: Phase 3 (dashboard SPA, API), Phase 2.5 (retry, multi-schedule)
 **Requirements**: UI-01, UI-02
@@ -140,8 +140,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 3.1-01-PLAN.md — API layer: expose retry/multi-schedule fields, @every handling in sanitizeJob
-- [ ] 3.1-02-PLAN.md — Dashboard SPA: multi-schedule display, retry info, @every support, cronExprs editing
+- [x] 3.1-01-PLAN.md — API layer: expose retry/multi-schedule fields, @every handling in sanitizeJob ✅ Done
+- [x] 3.1-02-PLAN.md — Dashboard SPA: multi-schedule display, retry info, @every support, cronExprs editing ✅ Done
 
 ### Phase 4: Enterprise & Polish (Planned)
 **Goal**: Multi-target storage, advanced monitoring, performance optimization, and security hardening
@@ -165,5 +165,5 @@ Phases execute in numeric order: 1 → 1.5 → 2 → 2.5 → 3 → 3.1 → 4
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
 | 2.5. Advanced Scheduler | 2/2 executed | ✅ Complete | 2026-04-30 |
 | 3. Desktop UI | 3/3 executed | ✅ Complete | 2026-04-29 |
-| 3.1. UI Scheduling Update | 2/2 planned | 📋 Planned | - |
+| 3.1. UI Scheduling Update | 2/2 executed | ✅ Complete | 2026-05-04 |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |

@@ -43,6 +43,8 @@ type BackupJobWithStatus struct {
 	LastError       string     `json:"lastError,omitempty"`
 	ScheduleEnabled bool       `json:"scheduleEnabled"`
 	CronExprs       []string   `json:"cronExprs,omitempty"`
+	RetryCount      int        `json:"retryCount,omitempty"`
+	NextRetryTime   time.Time  `json:"nextRetryTime,omitempty"`
 }
 
 // CreateJobRequest is the JSON body for creating a new job.
@@ -58,17 +60,22 @@ type CreateJobRequest struct {
 	ObjectLockMode string   `json:"objectLockMode,omitempty"`
 }
 
+var standardParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+var enhancedParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting
 // the EncryptionPassword field for safe API responses.
 func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 	nextRun := job.NextRun
 	if nextRun.IsZero() && job.ScheduleEnabled && len(job.CronExprs) > 0 {
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		// Compute the nearest upcoming run across all cron expressions
 		now := time.Now()
 		var nearest time.Time
 		for _, expr := range job.CronExprs {
-			if sched, err := parser.Parse(expr); err == nil {
+			sched, err := standardParser.Parse(expr)
+			if err != nil {
+				sched, err = enhancedParser.Parse(expr)
+			}
+			if err == nil {
 				candidate := sched.Next(now)
 				if nearest.IsZero() || candidate.Before(nearest) {
 					nearest = candidate
@@ -92,6 +99,8 @@ func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 		LastError:       job.LastError,
 		ScheduleEnabled: job.ScheduleEnabled,
 		CronExprs:       job.CronExprs,
+		RetryCount:      job.RetryCount,
+		NextRetryTime:   job.NextRetryTime,
 	}
 }
 

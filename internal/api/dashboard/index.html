@@ -140,8 +140,9 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
         <input type="password" id="newJobPassword" placeholder="Enter encryption password" />
       </div>
       <div class="form-group">
-        <label>Schedule (optional cron)</label>
-        <input type="text" id="newJobCron" placeholder="e.g. 0 2 * * * (daily at 2am)" />
+        <label>Schedule (optional cron, comma-separated)</label>
+        <input type="text" id="newJobCron" placeholder="e.g. 0 2 * * *, 0 14 * * * or @every 6h" />
+        <div style="font-size:11px;color:#8892b0;margin-top:4px">Separate multiple expressions with commas. Supports standard cron and @every intervals.</div>
       </div>
       <div class="form-group">
         <label>Retention (days)</label>
@@ -317,18 +318,34 @@ function formatBytes(b){if(!b||b===0)return'0';var u=['B','KB','MB','GB'],i=Math
 function formatDuration(d){if(!d)return'—';if(typeof d==='string'){var n=parseInt(d);if(!isNaN(n))d=n}if(d<60)return Math.round(d)+'s';if(d<3600)return Math.floor(d/60)+'m '+Math.round(d%60)+'s';return Math.floor(d/3600)+'h '+Math.floor((d%3600)/60)+'m'}
 function escapeHtml(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML}
 
-function formatCron(expr){
-  if(!expr)return'—';
-  var p=expr.trim().split(/\s+/);if(p.length!==5)return escapeHtml(expr);
-  var m=p[0],h=p[1],dom=p[2],mon=p[3],dow=p[4],desc='';
-  if(m==='*'&&h==='*'&&dom==='*'&&mon==='*'&&dow==='*')desc='Every minute';
-  else if(m==='0'&&h==='*'&&dom==='*'&&mon==='*'&&dow==='*')desc='Every hour';
-  else if(m==='0'&&dom==='*'&&mon==='*'&&dow==='*'){var hn=parseInt(h);desc=hn===0?'Midnight':hn===12?'Noon':hn>12?'Daily at '+(hn-12)+':00 PM':'Daily at '+hn+':00 AM'}
-  else if(m.startsWith('*/'))desc='Every '+m.substring(2)+' minute(s)';
-  else if(h.startsWith('*/'))desc='Every '+h.substring(2)+' hours';
-  else if(h.includes(',')){desc='At '+h.split(',').map(function(x){var n=parseInt(x);return n===0?'midnight':n===12?'noon':n>12?(n-12)+' PM':n+' AM'}).join(', ');if(m!=='0')desc+=' minute '+m}
-  else{var hn2=parseInt(h);desc=(hn2===0?'Midnight':hn2===12?'Noon':hn2>12?'Daily at '+(hn2-12)+':00 PM':'Daily at '+hn2+':00 AM')+(m!=='0'?' at minute '+m:'')}
-  return'<span title="'+escapeHtml(expr)+'">'+escapeHtml(desc)+'</span>'
+function formatCronExprs(exprs){
+  if(!exprs||exprs.length===0)return'<span class="badge badge-never">Not scheduled</span>';
+  var parts=[];
+  for(var i=0;i<exprs.length;i++){
+    var e=exprs[i].trim();
+    if(e.startsWith('@every ')){
+      var interval=e.substring(7).trim();
+      parts.push('<span title="'+escapeHtml(e)+'" style="color:#90caf9">Every '+interval+'</span>');
+      continue;
+    }
+    if(e==='@daily'||e==='@midnight'){parts.push('<span title="'+escapeHtml(e)+'" style="color:#90caf9">Daily at midnight</span>');continue}
+    if(e==='@hourly'){parts.push('<span title="'+escapeHtml(e)+'" style="color:#90caf9">Every hour</span>');continue}
+    if(e==='@weekly'){parts.push('<span title="'+escapeHtml(e)+'" style="color:#90caf9">Weekly on Sunday</span>');continue}
+    if(e==='@monthly'){parts.push('<span title="'+escapeHtml(e)+'" style="color:#90caf9">Monthly on the 1st</span>');continue}
+    if(e==='@yearly'||e==='@annually'){parts.push('<span title="'+escapeHtml(e)+'" style="color:#90caf9">Yearly on Jan 1</span>');continue}
+    var p=e.split(/\s+/);
+    if(p.length!==5){parts.push(escapeHtml(e));continue}
+    var m=p[0],h=p[1],dom=p[2],mon=p[3],dow=p[4],desc='';
+    if(m==='*'&&h==='*'&&dom==='*'&&mon==='*'&&dow==='*')desc='Every minute';
+    else if(m==='0'&&h==='*'&&dom==='*'&&mon==='*'&&dow==='*')desc='Every hour';
+    else if(m==='0'&&dom==='*'&&mon==='*'&&dow==='*'){var hn=parseInt(h);desc=hn===0?'Midnight':hn===12?'Noon':hn>12?'Daily at '+(hn-12)+':00 PM':'Daily at '+hn+':00 AM'}
+    else if(m.startsWith('*/'))desc='Every '+m.substring(2)+' minute(s)';
+    else if(h.startsWith('*/'))desc='Every '+h.substring(2)+' hours';
+    else if(h.includes(',')){desc='At '+h.split(',').map(function(x){var n=parseInt(x);return n===0?'midnight':n===12?'noon':n>12?(n-12)+' PM':n+' AM'}).join(', ');if(m!=='0')desc+=' minute '+m}
+    else{var hn2=parseInt(h);desc=(hn2===0?'Midnight':hn2===12?'Noon':hn2>12?'Daily at '+(hn2-12)+':00 PM':'Daily at '+hn2+':00 AM')+(m!=='0'?' at minute '+m:'')}
+    parts.push('<span title="'+escapeHtml(e)+'" style="color:#a8b2d1">'+escapeHtml(desc)+'</span>');
+  }
+  return parts.join('<br>');
 }
 
 function createJobCard(job){
@@ -337,15 +354,16 @@ function createJobCard(job){
     '<div class="job-card-header"><div><div class="job-name">'+escapeHtml(job.name||job.id)+'</div><div class="job-id">'+escapeHtml(job.id)+'</div></div><div>'+(job.lastRun?formatStatus('completed'):formatStatus('never'))+'</div></div>'+
     '<div class="job-card-body">'+
     '<div class="job-info-row"><span class="info-label">Source</span><span class="info-value">'+escapeHtml(job.sourcePath||'—')+'</span></div>'+
-    '<div class="job-info-row"><span class="info-label">Schedule</span><span class="info-value">'+(job.scheduleEnabled?formatCron(job.cronExpr):'Manual only')+'</span></div>'+
+    '<div class="job-info-row"><span class="info-label">Schedule</span><span class="info-value">'+(job.scheduleEnabled&&job.cronExprs&&job.cronExprs.length>0?formatCronExprs(job.cronExprs):'Manual only')+'</span></div>'+
     '<div class="job-info-row"><span class="info-label">Next Run</span><span class="info-value">'+formatTime(job.nextRun)+'</span></div>'+
     '<div class="job-info-row"><span class="info-label">Retention</span><span class="info-value">'+(job.retentionDays||'—')+' days</span></div>'+
     '<div class="job-info-row"><span class="info-label">Object Lock</span><span class="info-value">'+(job.objectLockMode||'NONE')+'</span></div>'+
     (job.lastError?'<div class="job-info-row"><span class="info-label" style="color:#ff8a80">Last Error</span><span class="info-value" style="color:#ff8a80">'+escapeHtml(job.lastError)+'</span></div>':'')+
+    (job.retryCount>0?'<div class="job-info-row"><span class="info-label" style="color:#ffa726">Retry</span><span class="info-value" style="color:#ffa726">Attempt '+(job.retryCount+1)+' of 3'+(job.nextRetryTime?' — next: '+formatTime(job.nextRetryTime):'')+'</span></div>':'')+
     '<div class="job-actions">'+
     '<button class="btn btn-primary btn-sm" onclick="triggerBackup(\''+job.id+'\')" id="runBtn-'+job.id+'">▶ Run</button>'+
     '<button class="btn btn-outline btn-sm" onclick="restoreJob(\''+job.id+'\')">↩ Restore</button>'+
-    '<button class="btn btn-outline btn-sm" onclick="rescheduleJob(\''+job.id+'\',\''+escapeHtml(job.cronExpr||'')+'\')">🔄 Reschedule</button>'+
+    '<button class="btn btn-outline btn-sm" onclick="rescheduleJob(\''+job.id+'\','+JSON.stringify(job.cronExprs||[])+')">🔄 Reschedule</button>'+
     '<button class="btn btn-danger btn-sm" onclick="deleteJob(\''+job.id+'\',\''+escapeHtml(job.name||job.id)+'\')">✕ Delete</button>'+
     '</div></div>'+
     '<button class="history-toggle" onclick="toggleHistory(\''+job.id+'\')"><span class="arrow" id="arrow-'+job.id+'">▶</span> Show History</button>'+
@@ -405,11 +423,15 @@ function restoreJob(jobId){
   });
 }
 
-function rescheduleJob(jobId,currentCron){
-  var newCron=prompt('Enter new cron expression for '+jobId+':',currentCron||'0 2 * * *');
-  if(!newCron)return;
-  fetch('/api/v1/jobs/'+jobId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({cronExpr:newCron})}).then(function(r){
-    if(r.ok){showToast('Schedule updated for '+jobId,'success');loadDashboard()}else{showToast('Failed to update schedule','error')}
+function rescheduleJob(jobId,currentExprs){
+  var promptMsg='Enter cron expression(s) for '+jobId+':\nSeparate multiple expressions with commas.\nExamples:\n  0 2 * * * (daily at 2am)\n  0 */6 * * * (every 6 hours)\n  @every 6h (every 6 hours)';
+  var current=currentExprs&&currentExprs.length>0?currentExprs.join(', '):'0 2 * * *';
+  var input=prompt(promptMsg,current);
+  if(!input||!input.trim())return;
+  var exprs=input.split(',').map(function(s){return s.trim()}).filter(function(s){return s.length>0});
+  if(exprs.length===0)return;
+  fetch('/api/v1/jobs/'+jobId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({cronExprs:exprs})}).then(function(r){
+    if(r.ok){showToast('Schedule updated for '+jobId,'success');loadDashboard()}else{r.json().then(function(d){showToast('Failed: '+(d.error||r.statusText),'error')})}
   }).catch(function(e){showToast('Error: '+e.message,'error')});
 }
 
@@ -449,7 +471,8 @@ async function createJob(){
   if(!nm){showToast('Job name is required','error');return}if(!p){showToast('Source directory is required','error');return}if(!pw){showToast('Encryption password is required','error');return}
   document.getElementById('addJobModal').classList.remove('open');
   try{
-    var r=await fetch('/api/v1/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,sourcePath:p,password:pw,cronExpr:cr,retentionDays:rt,objectLockMode:lm})});
+    var crParsed=cr?cr.split(',').map(function(s){return s.trim()}).filter(function(s){return s.length>0}):[];
+    var r=await fetch('/api/v1/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,sourcePath:p,password:pw,cronExprs:crParsed,retentionDays:rt,objectLockMode:lm})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     showToast('Job "'+nm+'" created!','success');
     document.getElementById('newJobName').value='';document.getElementById('newJobPath').value='';document.getElementById('newJobPassword').value='';document.getElementById('newJobCron').value='';document.getElementById('newJobRetention').value='30';document.getElementById('newJobLockMode').value='NONE';

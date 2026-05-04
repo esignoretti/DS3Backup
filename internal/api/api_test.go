@@ -453,6 +453,8 @@ func TestAPIResponseFormat_JobList(t *testing.T) {
 				NextRun:         now.Add(1 * time.Hour),
 				ScheduleEnabled: true,
 				CronExprs:       []string{"0 * * * *"},
+				RetryCount:      1,
+				NextRetryTime:   now.Add(1 * time.Minute),
 			},
 		},
 	}
@@ -485,7 +487,8 @@ func TestAPIResponseFormat_JobList(t *testing.T) {
 
 	// Verify required fields in each job
 	requiredFields := []string{"id", "name", "sourcePath", "retentionDays",
-		"objectLockMode", "enabled", "createdAt", "scheduleEnabled"}
+		"objectLockMode", "enabled", "createdAt", "scheduleEnabled",
+		"cronExprs", "retryCount", "nextRetryTime"}
 	for _, field := range requiredFields {
 		if _, ok := job[field]; !ok {
 			t.Errorf("missing required field: %s", field)
@@ -838,6 +841,117 @@ func TestPatchJob_UpdateCronExprs(t *testing.T) {
 	}
 	if resp.CronExprs[1] != "0 12 * * *" {
 		t.Errorf("expected second cronExpr '0 12 * * *', got %s", resp.CronExprs[1])
+	}
+}
+
+func TestBackupJobWithStatus_RetryFields(t *testing.T) {
+	now := time.Now()
+	runner := &mockRunner{}
+	jm := &mockJobManager{
+		jobs: map[string]*models.BackupJob{
+			"retry-job": {
+				ID:                "retry-job",
+				Name:              "Retry Test",
+				SourcePath:        "/tmp/test",
+				RetentionDays:     30,
+				Enabled:           true,
+				EncryptionPassword: "secret",
+				CreatedAt:         now,
+				ScheduleEnabled:   true,
+				CronExprs:         []string{"0 2 * * *"},
+				RetryCount:        2,
+				NextRetryTime:     now.Add(2 * time.Minute),
+				LastError:         "connection timeout",
+			},
+			"clean-job": {
+				ID:                "clean-job",
+				Name:              "Clean Job",
+				SourcePath:        "/tmp/clean",
+				RetentionDays:     30,
+				Enabled:           true,
+				EncryptionPassword: "secret",
+				CreatedAt:         now,
+				ScheduleEnabled:   true,
+				CronExprs:         []string{"0 6 * * *"},
+				RetryCount:        0,
+			},
+		},
+	}
+	s := newTestServer(runner, jm, nil)
+
+	// Test job with retry info
+	w := executeRequest(s, http.MethodGet, "/api/v1/jobs/retry-job", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	bodyStr := w.Body.String()
+	if !strings.Contains(bodyStr, "retryCount") {
+		t.Error("expected retryCount field in job with retries")
+	}
+	if !strings.Contains(bodyStr, "nextRetryTime") {
+		t.Error("expected nextRetryTime field in job with retries")
+	}
+	if !strings.Contains(bodyStr, "connection timeout") {
+		t.Error("expected lastError field to contain error message")
+	}
+
+	// Test job without retry info
+	w = executeRequest(s, http.MethodGet, "/api/v1/jobs/clean-job", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp JobDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if resp.Job.RetryCount != 0 {
+		t.Errorf("expected RetryCount 0 for clean job, got %d", resp.Job.RetryCount)
+	}
+}
+
+func TestSanitizeJob_IntervalExpressions(t *testing.T) {
+	now := time.Now()
+	job := &models.BackupJob{
+		ID:              "interval-job",
+		Name:            "Interval Job",
+		SourcePath:      "/tmp/test",
+		RetentionDays:   30,
+		Enabled:         true,
+		CreatedAt:       now,
+		ScheduleEnabled: true,
+		CronExprs:       []string{"@every 6h"},
+	}
+
+	sanitized := sanitizeJob(job)
+
+	if sanitized.NextRun.IsZero() {
+		t.Error("expected non-zero NextRun for @every expression")
+	}
+	if sanitized.NextRun.Before(now) {
+		t.Error("expected NextRun to be in the future")
+	}
+	if sanitized.NextRun.After(now.Add(7 * time.Hour)) {
+		t.Errorf("expected NextRun within 6 hours, got %v", sanitized.NextRun)
+	}
+}
+
+func TestSanitizeJob_MixedCronAndInterval(t *testing.T) {
+	now := time.Now()
+	job := &models.BackupJob{
+		ID:              "mixed-job",
+		Name:            "Mixed Job",
+		SourcePath:      "/tmp/test",
+		RetentionDays:   30,
+		Enabled:         true,
+		CreatedAt:       now,
+		ScheduleEnabled: true,
+		CronExprs:       []string{"0 2 * * *", "@every 12h"},
+	}
+
+	sanitized := sanitizeJob(job)
+
+	if sanitized.NextRun.IsZero() {
+		t.Error("expected non-zero NextRun for mixed expressions")
 	}
 }
 
