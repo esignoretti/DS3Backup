@@ -100,22 +100,69 @@ pre.logs-content{margin:0;font-size:11px;line-height:1.4;color:#a8b2d1;white-spa
 </head>
 <body>
 <div class="container">
+  <header class="header">
+    <div class="header-title">
+      <div>
+        <h1>DS3 Backup</h1>
+        <div class="subtitle">Desktop Backup Daemon</div>
+      </div>
+    </div>
+    <div class="connection-status">
+      <span class="status-dot disconnected" id="connDot"></span>
+      <span id="connText">Connecting...</span>
+    </div>
+  </header>
 
   <div class="error-banner" id="errorBanner">
     ⚠ <span id="errorText">Connection to daemon lost</span>
   </div>
 
+  <div class="status-bar" id="statusBar">
+    <div class="status-card">
+      <span class="label">Scheduler</span>
+      <span class="value" id="schedulerStatus">—</span>
+    </div>
+    <div class="status-card">
+      <span class="label">Scheduled Jobs</span>
+      <span class="value" id="scheduledCount">—</span>
+    </div>
+    <div class="status-card">
+      <span class="label">API Port</span>
+      <span class="value" id="apiPort">—</span>
+    </div>
+    <div class="status-card">
+      <span class="label">Daemon Uptime</span>
+      <span class="value" id="daemonUptime">—</span>
+    </div>
+  </div>
 
+  <div class="actions-bar">
+    <button class="btn btn-primary" id="btnStartScheduler" style="display:none" onclick="toggleScheduler()">▶ Start Scheduler</button>
     <button class="btn btn-danger" id="btnStopScheduler" onclick="toggleScheduler()">⏹ Stop Scheduler</button>
     <button class="btn btn-outline" onclick="loadLogs()">📋 Show Logs</button>
     <button class="btn btn-outline" onclick="refreshNow()">🔄 Refresh Now</button>
   </div>
 
+  <div class="loading" id="loadingIndicator">
+    <div class="spinner"></div>
+    <span>Loading dashboard...</span>
+  </div>
 
+  <button class="btn btn-success" onclick="document.getElementById('addJobModal').classList.add('open')" style="margin-bottom:16px">+ Add Job</button>
+
+  <div class="section" id="jobsSection" style="display:none">
+    <div class="section-header">
+      <h2>Backup Jobs</h2>
+      <span id="jobCount" style="font-size:13px;color:#8892b0"></span>
     </div>
     <div class="jobs-container" id="jobsContainer"></div>
   </div>
 
+  <div class="footer">
+    <span id="lastRefresh">Last updated: —</span>
+    <span id="refreshIndicator"></span>
+  </div>
+</div>
 
 <div id="addJobModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal">
@@ -551,7 +598,7 @@ function showToast(msg,type){
 
 document.addEventListener('DOMContentLoaded',function(){
   window.onerror=function(msg,url,line){showToast('JS Error: '+msg+' (line '+line+')','error')};
-  document.getElementById('refreshIndicator').textContent='Auto-refresh every '+(REFRESH_INTERVAL/1000)+'s';
+  var ri=document.getElementById('refreshIndicator');if(ri)ri.textContent='Auto-refresh every '+(REFRESH_INTERVAL/1000)+'s';
   loadDashboard();refreshTimer=setInterval(loadDashboard,REFRESH_INTERVAL);
 });
 </script>
