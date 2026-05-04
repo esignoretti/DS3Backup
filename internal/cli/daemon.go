@@ -214,7 +214,7 @@ Examples:
 		log.Printf("Scheduler started (interval: %ds)", cfg.Daemon.SchedulerInterval)
 
 		// 5. Create API adapters
-		runnerAdapter := &daemonRunnerAdapter{scheduler: sched}
+		runnerAdapter := &daemonRunnerAdapter{scheduler: sched, runner: runner}
 		jobAdapter := &daemonJobManagerAdapter{cfg: cfg}
 		historyProvider := &daemonHistoryProvider{cfg: cfg}
 
@@ -353,12 +353,12 @@ func runBackupForDaemon(job *models.BackupJob) (*models.BackupRun, error) {
 // daemonRunnerAdapter wraps the scheduler to implement api.BackupRunner.
 type daemonRunnerAdapter struct {
 	scheduler *scheduler.Scheduler
+	runner    *scheduler.BackupJobRunner
 }
 
 func (a *daemonRunnerAdapter) RunJob(jobID string) {
-	// Trigger an async backup via the scheduler's runner
-	// This is handled by the API handler which calls the BackupRunner
 	log.Printf("Daemon adapter: triggering backup for job %s", jobID)
+	a.runner.RunJobAsync(jobID)
 }
 
 func (a *daemonRunnerAdapter) GetScheduledJobs() []string {
