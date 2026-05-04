@@ -17,6 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Scheduling & Server** — Background scheduler, HTTP REST API, system tray, auto-backup daemon ✅ Complete
 - [x] **Phase 2.5: Advanced Scheduler** (INSERTED) — Retry logic, overlap prevention, missed-schedule catch-up, multi-schedule per job ✅ Complete
 - [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore ✅ Complete
+- [ ] **Phase 3.1: UI Scheduling Update** (INSERTED) — Dashboard now shows multi-schedule, retry info, interval expressions; API exposes retry fields ✅ Planned
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
 ## Phase Details
@@ -123,20 +124,39 @@ Plans:
 - [x] 03-02-PLAN.md — Web dashboard SPA: single-file HTML+CSS+JS dashboard served at GET /
 - [x] 03-03-PLAN.md — Tray wiring + notifications: open dashboard in browser, per-job backup items, notification integration
 
+### Phase 3.1: UI Scheduling Update (INSERTED)
+**Goal**: Update the desktop dashboard UI to expose advanced scheduling features — multi-schedule display, retry state visibility, interval expression support (@every), and proper multi-schedule editing in the add-job and reschedule flows.
+**Depends on**: Phase 3 (dashboard SPA, API), Phase 2.5 (retry, multi-schedule)
+**Requirements**: UI-01, UI-02
+**Success Criteria** (what must be TRUE):
+   1. Dashboard displays all cron expressions per job (not just the first)
+   2. Dashboard shows retry count and next retry time for jobs with failed scheduled backups
+   3. @every interval expressions display as human-readable "Every Xh" labels
+   4. Add-job modal accepts multiple comma-separated cron expressions
+   5. Reschedule button submits cronExprs array (not deprecated single cronExpr)
+   6. API exposes RetryCount and NextRetryTime in BackupJobWithStatus
+   7. go build and go test all pass
+
+**Plans**: 2 plans
+
+Plans:
+- [ ] 3.1-01-PLAN.md — API layer: expose retry/multi-schedule fields, @every handling in sanitizeJob
+- [ ] 3.1-02-PLAN.md — Dashboard SPA: multi-schedule display, retry info, @every support, cronExprs editing
+
 ### Phase 4: Enterprise & Polish (Planned)
 **Goal**: Multi-target storage, advanced monitoring, performance optimization, and security hardening
 **Depends on**: Phase 3
 **Requirements**: ENTERPRISE-01, ENTERPRISE-02, SEC-01, PERF-01
 **Success Criteria** (what must be TRUE):
-  1. User can back up to multiple S3 targets
-  2. Audit log of all operations is available
-  3. Fix outstanding tech debt items from codebase analysis
+   1. User can back up to multiple S3 targets
+   2. Audit log of all operations is available
+   3. Fix outstanding tech debt items from codebase analysis
 **Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 1.5 → 2 → 3 → 4
+Phases execute in numeric order: 1 → 1.5 → 2 → 2.5 → 3 → 3.1 → 4
 
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
@@ -144,5 +164,6 @@ Phases execute in numeric order: 1 → 1.5 → 2 → 3 → 4
 | 1.5. Refactor Backup & Restore | 3/3 executed | ✅ Complete | 2026-04-30 |
 | 2. Scheduling & Server | 4/4 executed | ✅ Complete | 2026-04-29 |
 | 2.5. Advanced Scheduler | 2/2 executed | ✅ Complete | 2026-04-30 |
-| 3. Desktop UI | 3 plans | ✅ Complete | 2026-04-29 |
+| 3. Desktop UI | 3/3 executed | ✅ Complete | 2026-04-29 |
+| 3.1. UI Scheduling Update | 2/2 planned | 📋 Planned | - |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |
