@@ -17,6 +17,7 @@ go.work
 
 # Config files (may contain secrets)
 config.json
+mimir-key
 *.key
 *.pem
 
