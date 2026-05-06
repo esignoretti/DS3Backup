@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/esignoretti/ds3backup/internal/config"
+	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
 type ScheduleManager struct {
@@ -22,9 +23,9 @@ func NewScheduleManager(cfg *config.Config, scheduler *Scheduler, runner *Backup
 	}
 }
 
-func (m *ScheduleManager) EnableJobSchedule(jobID string, cronExprs []string) error {
-	if len(cronExprs) == 0 {
-		return fmt.Errorf("at least one cron expression is required")
+func (m *ScheduleManager) EnableJobSchedule(jobID string, schedules []models.ScheduleEntry) error {
+	if len(schedules) == 0 {
+		return fmt.Errorf("at least one schedule entry is required")
 	}
 
 	job := m.cfg.GetJob(jobID)
@@ -32,19 +33,18 @@ func (m *ScheduleManager) EnableJobSchedule(jobID string, cronExprs []string) er
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
-	// Validate cron expressions by trying to schedule
-	if err := m.scheduler.ScheduleJob(jobID, cronExprs, m.runner.RunnerFactory()(jobID)); err != nil {
+	if err := m.scheduler.ScheduleJob(jobID, schedules, m.runner.RunnerFuncFor); err != nil {
 		return err
 	}
 
 	job.ScheduleEnabled = true
-	job.CronExprs = cronExprs
+	job.Schedules = schedules
 
 	if err := m.cfg.SaveConfig(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	log.Printf("Schedule enabled for job %s: %v", jobID, cronExprs)
+	log.Printf("Schedule enabled for job %s: %+v", jobID, schedules)
 	return nil
 }
 
@@ -56,6 +56,7 @@ func (m *ScheduleManager) DisableJobSchedule(jobID string) {
 
 	m.scheduler.UnscheduleJob(jobID)
 	job.ScheduleEnabled = false
+	job.Schedules = nil
 
 	if err := m.cfg.SaveConfig(); err != nil {
 		log.Printf("Warning: failed to save config after disabling schedule for %s: %v", jobID, err)
@@ -64,9 +65,9 @@ func (m *ScheduleManager) DisableJobSchedule(jobID string) {
 	log.Printf("Schedule disabled for job %s", jobID)
 }
 
-func (m *ScheduleManager) RescheduleJob(jobID string, cronExprs []string) error {
-	if len(cronExprs) == 0 {
-		return fmt.Errorf("at least one cron expression is required")
+func (m *ScheduleManager) RescheduleJob(jobID string, schedules []models.ScheduleEntry) error {
+	if len(schedules) == 0 {
+		return fmt.Errorf("at least one schedule entry is required")
 	}
 
 	job := m.cfg.GetJob(jobID)
@@ -76,31 +77,37 @@ func (m *ScheduleManager) RescheduleJob(jobID string, cronExprs []string) error 
 
 	m.scheduler.UnscheduleJob(jobID)
 
-	if err := m.scheduler.ScheduleJob(jobID, cronExprs, m.runner.RunnerFactory()(jobID)); err != nil {
+	if err := m.scheduler.ScheduleJob(jobID, schedules, m.runner.RunnerFuncFor); err != nil {
 		return err
 	}
 
-	job.CronExprs = cronExprs
+	job.Schedules = schedules
 	job.ScheduleEnabled = true
 
 	if err := m.cfg.SaveConfig(); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	log.Printf("Schedule updated for job %s: %v", jobID, cronExprs)
+	log.Printf("Schedule updated for job %s: %+v", jobID, schedules)
+	return nil
+}
+
+func (m *ScheduleManager) UpdateJob(job *models.BackupJob) error {
+	if err := m.cfg.SaveConfig(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
 	return nil
 }
 
 func (m *ScheduleManager) LoadAllSchedules() {
-	// Check for missed schedules since last checkpoint (D-07, D-08)
 	if !m.cfg.Daemon.LastSchedulerCheckpoint.IsZero() {
 		elapsed := time.Since(m.cfg.Daemon.LastSchedulerCheckpoint)
 		if elapsed > time.Duration(m.cfg.Daemon.SchedulerInterval)*time.Second*2 {
 			log.Printf("Scheduler was offline for %v. Checking for missed schedules...", elapsed)
 			for _, job := range m.cfg.Jobs {
-				if job.ScheduleEnabled && len(job.CronExprs) > 0 {
+				if job.ScheduleEnabled && len(job.Schedules) > 0 {
 					log.Printf("Job %s may have missed %d scheduled runs during offline period (last checkpoint: %s)",
-						job.ID, len(job.CronExprs), m.cfg.Daemon.LastSchedulerCheckpoint.Format(time.RFC3339))
+						job.ID, len(job.Schedules), m.cfg.Daemon.LastSchedulerCheckpoint.Format(time.RFC3339))
 				}
 			}
 		}
@@ -111,16 +118,14 @@ func (m *ScheduleManager) LoadAllSchedules() {
 		schedules = append(schedules, JobSchedule{
 			ID:        job.ID,
 			Enabled:   job.ScheduleEnabled,
-			CronExprs: job.CronExprs,
+			Schedules: job.Schedules,
 		})
 	}
 
-	m.scheduler.ReloadJobs(schedules, m.runner.RunnerFactory())
+	m.scheduler.ReloadJobs(schedules, m.runner.RunnerFuncFor)
 
-	// Persist scheduler checkpoint (D-08)
-	checkpoint := time.Now()
-	m.cfg.Daemon.LastSchedulerCheckpoint = checkpoint
-	m.scheduler.SetCheckpointTime(checkpoint)
+	m.cfg.Daemon.LastSchedulerCheckpoint = time.Now()
+	m.scheduler.SetCheckpointTime(m.cfg.Daemon.LastSchedulerCheckpoint)
 	if err := m.cfg.SaveConfig(); err != nil {
 		log.Printf("Warning: failed to save scheduler checkpoint: %v", err)
 	}

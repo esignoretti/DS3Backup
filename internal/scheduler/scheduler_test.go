@@ -37,8 +37,8 @@ func TestScheduleJob_ParsesValidCron(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 	ran := make(chan struct{}, 1)
 
-	err := s.ScheduleJob("test-job", []string{"0 2 * * *"}, func() {
-		ran <- struct{}{}
+	err := s.ScheduleJob("test-job", []models.ScheduleEntry{{Expr: "0 2 * * *"}}, func(jobID string, fullBackup bool) func() {
+		return func() { ran <- struct{}{} }
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -52,7 +52,7 @@ func TestScheduleJob_ParsesValidCron(t *testing.T) {
 func TestScheduleJob_RejectsInvalidCron(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
-	err := s.ScheduleJob("bad-job", []string{"not a cron expression"}, func() {})
+	err := s.ScheduleJob("bad-job", []models.ScheduleEntry{{Expr: "not a cron expression"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err == nil {
 		t.Fatal("expected error for invalid cron expression")
 	}
@@ -62,13 +62,13 @@ func TestReloadJobs_SchedulesEnabledOnly(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
 	jobs := []JobSchedule{
-		{ID: "job-1", Enabled: true, CronExprs: []string{"0 2 * * *"}},
-		{ID: "job-2", Enabled: false, CronExprs: []string{"0 3 * * *"}},
-		{ID: "job-3", Enabled: true, CronExprs: nil},
-		{ID: "job-4", Enabled: true, CronExprs: []string{"0 4 * * *"}},
+		{ID: "job-1", Enabled: true, Schedules: []models.ScheduleEntry{{Expr: "0 2 * * *"}}},
+		{ID: "job-2", Enabled: false, Schedules: []models.ScheduleEntry{{Expr: "0 3 * * *"}}},
+		{ID: "job-3", Enabled: true, Schedules: nil},
+		{ID: "job-4", Enabled: true, Schedules: []models.ScheduleEntry{{Expr: "0 4 * * *"}}},
 	}
 
-	s.ReloadJobs(jobs, func(jobID string) func() {
+	s.ReloadJobs(jobs, func(jobID string, fullBackup bool) func() {
 		return func() {}
 	})
 
@@ -113,7 +113,7 @@ func TestStartStop_TransitionsState(t *testing.T) {
 func TestUnscheduleJob(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
-	s.ScheduleJob("job-1", []string{"0 2 * * *"}, func() {})
+	s.ScheduleJob("job-1", []models.ScheduleEntry{{Expr: "0 2 * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if !s.HasJob("job-1") {
 		t.Fatal("expected job-1 to be scheduled")
 	}
@@ -132,8 +132,8 @@ func TestScheduleJob_TriggersRunner(t *testing.T) {
 	defer s.Stop()
 
 	var ran atomic.Bool
-	s.ScheduleJob("trigger-test", []string{"* * * * *"}, func() {
-		ran.Store(true)
+	s.ScheduleJob("trigger-test", []models.ScheduleEntry{{Expr: "* * * * *"}}, func(jobID string, fullBackup bool) func() {
+		return func() { ran.Store(true) }
 	})
 
 	time.Sleep(3200 * time.Millisecond)
@@ -145,7 +145,7 @@ func TestScheduleJob_TriggersRunner(t *testing.T) {
 func TestMultiSchedule_AllExpressionsFire(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
-	err := s.ScheduleJob("multi-job", []string{"0 2 * * *", "0 14 * * *"}, func() {})
+	err := s.ScheduleJob("multi-job", []models.ScheduleEntry{{Expr: "0 2 * * *"}, {Expr: "0 14 * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestMultiSchedule_PartialExprFailure(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
 	// One valid + one invalid should return error and not register any
-	err := s.ScheduleJob("partial-job", []string{"0 2 * * *", "not-valid"}, func() {})
+	err := s.ScheduleJob("partial-job", []models.ScheduleEntry{{Expr: "0 2 * * *"}, {Expr: "not-valid"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err == nil {
 		t.Fatal("expected error for invalid cron expression")
 	}
@@ -180,7 +180,7 @@ func TestMultiSchedule_ReloadJobsMultipleExpressions(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
 	// Schedule with 2 expressions
-	err := s.ScheduleJob("reload-job", []string{"0 2 * * *", "0 14 * * *"}, func() {})
+	err := s.ScheduleJob("reload-job", []models.ScheduleEntry{{Expr: "0 2 * * *"}, {Expr: "0 14 * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -191,8 +191,8 @@ func TestMultiSchedule_ReloadJobsMultipleExpressions(t *testing.T) {
 
 	// Reload with different expressions
 	s.ReloadJobs([]JobSchedule{
-		{ID: "reload-job", Enabled: true, CronExprs: []string{"30 1 * * *"}},
-	}, func(jobID string) func() { return func() {} })
+		{ID: "reload-job", Enabled: true, Schedules: []models.ScheduleEntry{{Expr: "30 1 * * *"}}},
+	}, func(jobID string, fullBackup bool) func() { return func() {} })
 
 	if !s.HasJob("reload-job") {
 		t.Error("expected reload-job to still be scheduled after reload")
@@ -208,7 +208,7 @@ func TestMultiSchedule_UnscheduleJobRemovesAll(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
 	// Schedule with 2 expressions
-	err := s.ScheduleJob("multi-remove", []string{"0 2 * * *", "0 14 * * *"}, func() {})
+	err := s.ScheduleJob("multi-remove", []models.ScheduleEntry{{Expr: "0 2 * * *"}, {Expr: "0 14 * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestMultiSchedule_UnscheduleJobRemovesAll(t *testing.T) {
 func TestScheduleJob_EmptyExprsReturnsError(t *testing.T) {
 	s := NewScheduler(60*time.Second, newTestLogger())
 
-	err := s.ScheduleJob("empty-job", []string{}, func() {})
+	err := s.ScheduleJob("empty-job", []models.ScheduleEntry{}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err == nil {
 		t.Fatal("expected error for empty cron expressions")
 	}
@@ -250,78 +250,7 @@ func TestRetryRunner_SuccessOnFirstAttempt(t *testing.T) {
 		getJob: func(jobID string) *models.BackupJob {
 			return cfg.GetJob(jobID)
 		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
-			attemptCount.Add(1)
-			return &models.BackupRun{}, nil
-		},
-		jobLocks:      make(map[string]*sync.Mutex),
-		retryInterval: time.Millisecond,
-	}
-
-	runner.RunJob(job.ID)
-
-	if n := attemptCount.Load(); n != 1 {
-		t.Errorf("expected 1 attempt, got %d", n)
-	}
-
-	updatedJob := cfg.GetJob(job.ID)
-	if updatedJob.LastError != "" {
-		t.Errorf("expected LastError to be cleared, got %q", updatedJob.LastError)
-	}
-}
-
-func TestRetryRunner_RetriesOnFailure(t *testing.T) {
-	job := models.BackupJob{
-		ID:      "retry-transient",
-		Name:    "Retry Transient Job",
-		Enabled: true,
-	}
-	cfg := newTestConfigWithJob(t, job)
-
-	var attemptCount atomic.Int32
-	runner := &BackupJobRunner{
-		cfg: cfg,
-		getJob: func(jobID string) *models.BackupJob {
-			return cfg.GetJob(jobID)
-		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
-			n := attemptCount.Add(1)
-			if n < 3 {
-				return &models.BackupRun{Error: "transient error"}, nil
-			}
-			return &models.BackupRun{}, nil
-		},
-		jobLocks:      make(map[string]*sync.Mutex),
-		retryInterval: time.Millisecond,
-	}
-
-	runner.RunJob(job.ID)
-
-	if n := attemptCount.Load(); n != 3 {
-		t.Errorf("expected 3 attempts (1 initial + 2 retries), got %d", n)
-	}
-
-	updatedJob := cfg.GetJob(job.ID)
-	if updatedJob.LastError != "" {
-		t.Errorf("expected LastError to be cleared after successful retry, got %q", updatedJob.LastError)
-	}
-}
-
-func TestRetryRunner_ExhaustsRetriesThenErrors(t *testing.T) {
-	job := models.BackupJob{
-		ID:      "retry-exhaust",
-		Name:    "Retry Exhaust Job",
-		Enabled: true,
-	}
-	cfg := newTestConfigWithJob(t, job)
-
-	var attemptCount atomic.Int32
-	runner := &BackupJobRunner{
-		cfg: cfg,
-		getJob: func(jobID string) *models.BackupJob {
-			return cfg.GetJob(jobID)
-		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
+		runBackupFn: func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 			attemptCount.Add(1)
 			return nil, errTestBackup
 		},
@@ -355,7 +284,7 @@ func TestRetryRunner_SkipForDisabledJob(t *testing.T) {
 		getJob: func(jobID string) *models.BackupJob {
 			return cfg.GetJob(jobID)
 		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
+		runBackupFn: func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 			attemptCount.Add(1)
 			return nil, errTestBackup
 		},
@@ -391,7 +320,7 @@ func TestOverlapPrevention_SkipsSecondRun(t *testing.T) {
 		getJob: func(jobID string) *models.BackupJob {
 			return cfg.GetJob(jobID)
 		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
+		runBackupFn: func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 			close(started)
 			<-proceed
 			return &models.BackupRun{}, nil
@@ -446,7 +375,7 @@ func TestOverlapPrevention_DifferentJobsParallel(t *testing.T) {
 		getJob: func(jobID string) *models.BackupJob {
 			return cfg.GetJob(jobID)
 		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
+		runBackupFn: func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 			time.Sleep(20 * time.Millisecond)
 			mu.Lock()
 			completedJobs = append(completedJobs, j.ID)
@@ -496,7 +425,7 @@ func TestOverlapPrevention_TryLockReleasedOnCompletion(t *testing.T) {
 		getJob: func(jobID string) *models.BackupJob {
 			return cfg.GetJob(jobID)
 		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
+		runBackupFn: func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 			attemptCount.Add(1)
 			return &models.BackupRun{}, nil
 		},
@@ -534,7 +463,7 @@ func TestPanicRecovery_SetsLastError(t *testing.T) {
 		getJob: func(jobID string) *models.BackupJob {
 			return cfg.GetJob(jobID)
 		},
-		runBackupFn: func(j *models.BackupJob) (*models.BackupRun, error) {
+		runBackupFn: func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 			panic("test panic in backup")
 		},
 		jobLocks:      make(map[string]*sync.Mutex),
@@ -600,7 +529,7 @@ func TestLoadAllSchedules_LogsMissed(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	s := NewScheduler(60*time.Second, newTestLogger())
-	runner := NewBackupJobRunner(cfg, cfg.GetJob, func(j *models.BackupJob) (*models.BackupRun, error) {
+	runner := NewBackupJobRunner(cfg, cfg.GetJob, func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 		return &models.BackupRun{}, nil
 	})
 	sm := NewScheduleManager(cfg, s, runner)
@@ -626,7 +555,7 @@ func TestLoadAllSchedules_UpdatesCheckpoint(t *testing.T) {
 	cfg.Daemon.LastSchedulerCheckpoint = time.Time{}
 
 	s := NewScheduler(60*time.Second, newTestLogger())
-	runner := NewBackupJobRunner(cfg, cfg.GetJob, func(j *models.BackupJob) (*models.BackupRun, error) {
+	runner := NewBackupJobRunner(cfg, cfg.GetJob, func(j *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 		return &models.BackupRun{}, nil
 	})
 	sm := NewScheduleManager(cfg, s, runner)

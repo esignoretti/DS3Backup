@@ -22,7 +22,7 @@ func testLogger() *log.Logger {
 func TestScheduler_CronExpressionAtMidnight(t *testing.T) {
 	s := NewScheduler(1*time.Second, testLogger())
 
-	err := s.ScheduleJob("midnight-job", []string{"0 0 * * *"}, func() {})
+	err := s.ScheduleJob("midnight-job", []models.ScheduleEntry{{Expr: "0 0 * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err != nil {
 		t.Fatalf("expected no error for midnight cron, got: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestScheduler_CronExpressionAtMidnight(t *testing.T) {
 func TestScheduler_EveryMinuteExpression(t *testing.T) {
 	s := NewScheduler(1*time.Second, testLogger())
 
-	err := s.ScheduleJob("every-minute", []string{"* * * * *"}, func() {})
+	err := s.ScheduleJob("every-minute", []models.ScheduleEntry{{Expr: "* * * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err != nil {
 		t.Fatalf("expected no error for every-minute cron, got: %v", err)
 	}
@@ -77,17 +77,17 @@ func TestScheduler_MultipleJobs(t *testing.T) {
 
 	// Schedule 3 jobs
 	type jobDef struct {
-		id        string
-		cronExprs []string
+		id       string
+		schedule []models.ScheduleEntry
 	}
 	jobDefs := []jobDef{
-		{"job-a", []string{"0 2 * * *"}},
-		{"job-b", []string{"30 1 * * *"}},
-		{"job-c", []string{"0 12 * * *"}},
+		{"job-a", []models.ScheduleEntry{{Expr: "0 2 * * *"}}},
+		{"job-b", []models.ScheduleEntry{{Expr: "30 1 * * *"}}},
+		{"job-c", []models.ScheduleEntry{{Expr: "0 12 * * *"}}},
 	}
 
 	for _, j := range jobDefs {
-		err := s.ScheduleJob(j.id, j.cronExprs, func() {})
+		err := s.ScheduleJob(j.id, j.schedule, func(jobID string, fullBackup bool) func() { return func() {} })
 		if err != nil {
 			t.Fatalf("failed to schedule %s: %v", j.id, err)
 		}
@@ -112,8 +112,8 @@ func TestScheduler_MultipleJobs(t *testing.T) {
 
 	// Reload with only job-c
 	s.ReloadJobs([]JobSchedule{
-		{ID: "job-c", Enabled: true, CronExprs: []string{"0 12 * * *"}},
-	}, func(jobID string) func() {
+		{ID: "job-c", Enabled: true, Schedules: []models.ScheduleEntry{{Expr: "0 12 * * *"}}},
+	}, func(jobID string, fullBackup bool) func() {
 		return func() {}
 	})
 
@@ -134,11 +134,13 @@ func TestScheduler_ReloadJobsOverwritesExisting(t *testing.T) {
 	s := NewScheduler(1*time.Second, testLogger())
 
 	// Schedule job A with expression X and job B with expression Y
-	err := s.ScheduleJob("job-A", []string{"0 2 * * *"}, func() {})
+	err := s.ScheduleJob("job-A", []models.ScheduleEntry{{Expr: "0 2 * * *"}}, func(jobID string, fullBackup bool) func() {
+		return func() {}
+	})
 	if err != nil {
 		t.Fatalf("failed to schedule job-A: %v", err)
 	}
-	err = s.ScheduleJob("job-B", []string{"30 1 * * *"}, func() {})
+	err = s.ScheduleJob("job-B", []models.ScheduleEntry{{Expr: "30 1 * * *"}}, func(jobID string, fullBackup bool) func() { return func() {} })
 	if err != nil {
 		t.Fatalf("failed to schedule job-B: %v", err)
 	}
@@ -147,8 +149,8 @@ func TestScheduler_ReloadJobsOverwritesExisting(t *testing.T) {
 	callCount := make(map[string]int)
 	var mu sync.Mutex
 	s.ReloadJobs([]JobSchedule{
-		{ID: "job-A", Enabled: true, CronExprs: []string{"0 5 * * *"}},
-	}, func(jobID string) func() {
+		{ID: "job-A", Enabled: true, Schedules: []models.ScheduleEntry{{Expr: "0 5 * * *"}}},
+	}, func(jobID string, fullBackup bool) func() {
 		return func() {
 			mu.Lock()
 			callCount[jobID]++
@@ -187,7 +189,7 @@ func TestBackupJobRunner_RunJobCallsBackupFn(t *testing.T) {
 	cfg := newTestConfig(t)
 
 	runBackupCalled := make(chan string, 1)
-	mockRunBackup := func(job *models.BackupJob) (*models.BackupRun, error) {
+	mockRunBackup := func(job *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 		runBackupCalled <- job.ID
 		now := time.Now()
 		return &models.BackupRun{
@@ -242,7 +244,7 @@ func TestScheduleManager_EnableDisableCycle(t *testing.T) {
 	s := NewScheduler(1*time.Second, testLogger())
 
 	var runCount atomic.Int32
-	mockRunner := NewBackupJobRunner(cfg, cfg.GetJob, func(job *models.BackupJob) (*models.BackupRun, error) {
+	mockRunner := NewBackupJobRunner(cfg, cfg.GetJob, func(job *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 		runCount.Add(1)
 		now := time.Now()
 		return &models.BackupRun{JobID: job.ID, RunTime: now, Status: "completed"}, nil
@@ -258,7 +260,7 @@ func TestScheduleManager_EnableDisableCycle(t *testing.T) {
 	cfg.Jobs = append(cfg.Jobs, testJob)
 
 	// Enable the job with a cron expression
-	err := manager.EnableJobSchedule("sched-job-1", []string{"0 * * * *"})
+	err := manager.EnableJobSchedule("sched-job-1", []models.ScheduleEntry{{Expr: "0 * * * *"}})
 	if err != nil {
 		t.Fatalf("expected no error enabling schedule, got: %v", err)
 	}
@@ -276,8 +278,8 @@ func TestScheduleManager_EnableDisableCycle(t *testing.T) {
 	if !job.ScheduleEnabled {
 		t.Error("expected ScheduleEnabled to be true")
 	}
-	if len(job.CronExprs) != 1 || job.CronExprs[0] != "0 * * * *" {
-		t.Errorf("expected CronExprs [\"0 * * * *\"], got %v", job.CronExprs)
+	if len(job.Schedules) != 1 || job.Schedules[0].Expr != "0 * * * *" {
+		t.Errorf("expected Schedules [\"0 * * * *\"], got %v", job.Schedules)
 	}
 
 	// Disable the job

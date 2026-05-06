@@ -13,13 +13,13 @@ import (
 type BackupJobRunner struct {
 	cfg           *config.Config
 	getJob        func(jobID string) *models.BackupJob
-	runBackupFn   func(job *models.BackupJob) (*models.BackupRun, error)
+	runBackupFn   func(job *models.BackupJob, fullBackup bool) (*models.BackupRun, error)
 	jobLocks      map[string]*sync.Mutex
 	lockMu        sync.Mutex
 	retryInterval time.Duration
 }
 
-func NewBackupJobRunner(cfg *config.Config, getJob func(string) *models.BackupJob, runBackupFn func(*models.BackupJob) (*models.BackupRun, error)) *BackupJobRunner {
+func NewBackupJobRunner(cfg *config.Config, getJob func(string) *models.BackupJob, runBackupFn func(*models.BackupJob, bool) (*models.BackupRun, error)) *BackupJobRunner {
 	return &BackupJobRunner{
 		cfg:           cfg,
 		getJob:        getJob,
@@ -39,6 +39,14 @@ func (r *BackupJobRunner) getJobLock(jobID string) *sync.Mutex {
 }
 
 func (r *BackupJobRunner) RunJob(jobID string) {
+	r.runJob(jobID, false)
+}
+
+func (r *BackupJobRunner) RunJobFull(jobID string) {
+	r.runJob(jobID, true)
+}
+
+func (r *BackupJobRunner) runJob(jobID string, fullBackup bool) {
 	lock := r.getJobLock(jobID)
 
 	// Per-job mutex — TryLock ensures only one run at a time (D-05, D-06)
@@ -67,7 +75,7 @@ func (r *BackupJobRunner) RunJob(jobID string) {
 			return
 		}
 
-		run, err := r.runBackupFn(job)
+		run, err := r.runBackupFn(job, fullBackup)
 
 		if err == nil && (run == nil || run.Error == "") {
 			// Success! Update config and return
@@ -108,11 +116,18 @@ func (r *BackupJobRunner) RunJob(jobID string) {
 }
 
 func (r *BackupJobRunner) RunJobAsync(jobID string) {
+	r.runJobAsync(jobID, false)
+}
+
+func (r *BackupJobRunner) RunJobAsyncFull(jobID string) {
+	r.runJobAsync(jobID, true)
+}
+
+func (r *BackupJobRunner) runJobAsync(jobID string, fullBackup bool) {
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Printf("PANIC in scheduled backup for job %s: %v", jobID, rec)
-				// Panic is treated as failure — mark LastError on the job (D-04)
 				job := r.getJob(jobID)
 				if job != nil {
 					job.LastError = fmt.Sprintf("panic: %v", rec)
@@ -122,13 +137,27 @@ func (r *BackupJobRunner) RunJobAsync(jobID string) {
 				}
 			}
 		}()
-		r.RunJob(jobID)
+		if fullBackup {
+			r.RunJobFull(jobID)
+		} else {
+			r.RunJob(jobID)
+		}
 	}()
 }
 
 func (r *BackupJobRunner) RunnerFactory() func(jobID string) func() {
 	return func(jobID string) func() {
 		return func() {
+			r.RunJobAsync(jobID)
+		}
+	}
+}
+
+func (r *BackupJobRunner) RunnerFuncFor(jobID string, fullBackup bool) func() {
+	return func() {
+		if fullBackup {
+			r.RunJobAsyncFull(jobID)
+		} else {
 			r.RunJobAsync(jobID)
 		}
 	}

@@ -5,35 +5,40 @@ import (
 	"time"
 )
 
+// ScheduleEntry represents a single cron schedule for a job,
+// with an optional flag to force a full backup on each run.
+type ScheduleEntry struct {
+	Expr      string `json:"expr"`
+	FullBackup bool  `json:"fullBackup,omitempty"`
+}
+
 // BackupJob represents a backup job configuration.
-// CronExprs holds one or more cron expressions for the job's schedule.
-// The custom UnmarshalJSON also handles the legacy single-cronExpr format
-// for backward compatibility with existing config files.
+// Schedules holds the job's cron schedules (each with optional full backup flag).
+// CronExprs is kept for backward-compatible deserialization of old config files.
 type BackupJob struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	SourcePath       string     `json:"sourcePath"`
-	RetentionDays    int        `json:"retentionDays"`
-	ObjectLockMode   string     `json:"objectLockMode"`
-	Enabled          bool       `json:"enabled"`
-	EncryptionPassword string   `json:"encryptionPassword"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	LastRun          *time.Time `json:"lastRun,omitempty"`
-	NextRun          time.Time  `json:"nextRun"`
-	LastError        string     `json:"lastError,omitempty"`
-	ScheduleEnabled  bool       `json:"scheduleEnabled"`
-	CronExprs        []string   `json:"cronExprs,omitempty"`
-	NextRetryTime      time.Time  `json:"nextRetryTime,omitempty"`
-	RetryCount         int        `json:"retryCount,omitempty"`
-	RunInProgress      bool       `json:"-"`
-	LastCheckpointTime time.Time  `json:"lastCheckpointTime,omitempty"`
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	SourcePath         string          `json:"sourcePath"`
+	RetentionDays      int             `json:"retentionDays"`
+	ObjectLockMode     string          `json:"objectLockMode"`
+	Enabled            bool            `json:"enabled"`
+	EncryptionPassword string          `json:"encryptionPassword"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	LastRun            *time.Time      `json:"lastRun,omitempty"`
+	NextRun            time.Time       `json:"nextRun"`
+	LastError          string          `json:"lastError,omitempty"`
+	ScheduleEnabled    bool            `json:"scheduleEnabled"`
+	CronExprs          []string        `json:"cronExprs,omitempty"`
+	Schedules          []ScheduleEntry `json:"schedules,omitempty"`
+	NextRetryTime      time.Time       `json:"nextRetryTime,omitempty"`
+	RetryCount         int             `json:"retryCount,omitempty"`
+	RunInProgress      bool            `json:"-"`
+	LastCheckpointTime time.Time       `json:"lastCheckpointTime,omitempty"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for BackupJob.
-// It handles both the new cronExprs format and the legacy single cronExpr format
-// to ensure existing config files migrate cleanly.
+// It handles both the new schedules format and the legacy single cronExpr/cronExprs format.
 func (j *BackupJob) UnmarshalJSON(data []byte) error {
-	// Alias to avoid infinite recursion
 	type jobAlias BackupJob
 	raw := struct {
 		*jobAlias
@@ -44,9 +49,18 @@ func (j *BackupJob) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	// If no new-format expressions exist but a legacy cronExpr was set, migrate it
-	if len(j.CronExprs) == 0 && raw.LegacyCronExpr != "" {
-		j.CronExprs = []string{raw.LegacyCronExpr}
+	// Migrate legacy cronExprs to schedules if no schedules yet
+	if len(j.Schedules) == 0 {
+		if len(j.CronExprs) > 0 {
+			for _, expr := range j.CronExprs {
+				if expr != "" {
+					j.Schedules = append(j.Schedules, ScheduleEntry{Expr: expr})
+				}
+			}
+			j.CronExprs = nil
+		} else if raw.LegacyCronExpr != "" {
+			j.Schedules = append(j.Schedules, ScheduleEntry{Expr: raw.LegacyCronExpr})
+		}
 	}
 	return nil
 }

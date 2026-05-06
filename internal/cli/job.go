@@ -22,7 +22,7 @@ var (
 	jobLockMode   string
 	jobPassword   string
 	jobClean      bool
-	jobCron       string
+	jobCrons      []string
 	jobDisable    bool
 	jobScheduleID string
 )
@@ -146,8 +146,8 @@ var jobListCmd = &cobra.Command{
 			} else {
 				fmt.Printf("   Last Run: Never\n")
 			}
-			if job.ScheduleEnabled && len(job.CronExprs) > 0 {
-				fmt.Printf("   Schedule: %v\n", job.CronExprs)
+			if job.ScheduleEnabled && len(job.Schedules) > 0 {
+				fmt.Printf("   Schedule: %v\n", job.Schedules)
 			}
 			fmt.Println()
 		}
@@ -278,9 +278,10 @@ A cron expression uses the standard 5-field format:
   minute hour day-of-month month day-of-week
 
 Examples:
-  ds3backup job schedule job_XXX --cron "0 2 * * *"    # Daily at 2am
-  ds3backup job schedule job_XXX --cron "0 */6 * * *"  # Every 6 hours
-  ds3backup job schedule job_XXX --disable              # Disable scheduling`,
+  ds3backup job schedule job_XXX --cron "0 2 * * *"         # Daily at 2am
+  ds3backup job schedule job_XXX --cron "0 */6 * * *"       # Every 6 hours
+  ds3backup job schedule job_XXX --cron "0 2 * * *" --cron "0 14 * * 1"  # Multiple schedules
+  ds3backup job schedule job_XXX --disable                   # Disable scheduling`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jobID := jobScheduleID
 		if jobID == "" {
@@ -302,7 +303,7 @@ Examples:
 
 		if jobDisable {
 			job.ScheduleEnabled = false
-			job.CronExprs = nil
+			job.Schedules = nil
 			if err := saveConfig(cfg); err != nil {
 				return fmt.Errorf("failed to save config: %w", err)
 			}
@@ -310,23 +311,35 @@ Examples:
 			return nil
 		}
 
-		if jobCron == "" {
+		if len(jobCrons) == 0 {
 			return fmt.Errorf("--cron flag is required to enable scheduling")
 		}
 
-		// Validate cron expression
+		// Validate each cron expression
 		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		if _, err := parser.Parse(jobCron); err != nil {
-			return fmt.Errorf("invalid cron expression %q: %w", jobCron, err)
+		enhanced := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+		for _, expr := range jobCrons {
+			if _, err := parser.Parse(expr); err != nil {
+				if _, err2 := enhanced.Parse(expr); err2 != nil {
+					return fmt.Errorf("invalid cron expression %q: %w", expr, err)
+				}
+			}
 		}
 
 		job.ScheduleEnabled = true
-		job.CronExprs = []string{jobCron}
+		schedules := make([]models.ScheduleEntry, len(jobCrons))
+		for i, e := range jobCrons {
+			schedules[i] = models.ScheduleEntry{Expr: e}
+		}
+		job.Schedules = schedules
 		if err := saveConfig(cfg); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
-		fmt.Printf("✓ Schedule enabled for job %s: %s\n", jobID, jobCron)
+		fmt.Printf("✓ Schedule enabled for job %s:\n", jobID)
+		for _, expr := range jobCrons {
+			fmt.Printf("  %s\n", expr)
+		}
 		return nil
 	},
 }
@@ -350,7 +363,7 @@ func init() {
 
 	jobDeleteCmd.Flags().BoolVar(&jobClean, "clean", false, "Also delete all S3 backup files for this job")
 
-	jobScheduleCmd.Flags().StringVar(&jobCron, "cron", "", "Cron expression (e.g. \"0 2 * * *\")")
+	jobScheduleCmd.Flags().StringSliceVar(&jobCrons, "cron", nil, "Cron expression(s) (e.g. \"0 2 * * *\"; use multiple --cron flags for multiple schedules)")
 	jobScheduleCmd.Flags().BoolVar(&jobDisable, "disable", false, "Disable scheduling")
 	jobScheduleCmd.Flags().StringVar(&jobScheduleID, "id", "", "Job ID")
 }

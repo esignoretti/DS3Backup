@@ -79,6 +79,21 @@ func (m *mockJobManager) DeleteJob(jobID, password string, purge bool) error {
 	return nil
 }
 
+func (m *mockJobManager) RescheduleJob(jobID string, schedules []models.ScheduleEntry) error {
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+	job.Schedules = schedules
+	job.ScheduleEnabled = len(schedules) > 0
+	return nil
+}
+
+func (m *mockJobManager) UpdateJob(job *models.BackupJob) error {
+	m.jobs[job.ID] = job
+	return nil
+}
+
 // newTestServer creates an APIServer with mock dependencies for testing.
 func newTestServer(runner *mockRunner, jobManager *mockJobManager, historyProvider HistoryProvider) *APIServer {
 	runner.runCalled = make(chan string, 1)
@@ -833,14 +848,14 @@ func TestPatchJob_UpdateCronExprs(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp.CronExprs) != 2 {
-		t.Fatalf("expected 2 cron expressions after patch, got %d: %v", len(resp.CronExprs), resp.CronExprs)
+	if len(resp.Job.Schedules) != 2 {
+		t.Fatalf("expected 2 schedules after patch, got %d: %v", len(resp.Job.Schedules), resp.Job.Schedules)
 	}
-	if resp.CronExprs[0] != "30 1 * * *" {
-		t.Errorf("expected first cronExpr '30 1 * * *', got %s", resp.CronExprs[0])
+	if resp.Job.Schedules[0].Expr != "30 1 * * *" {
+		t.Errorf("expected first schedule expr '30 1 * * *', got %s", resp.Job.Schedules[0].Expr)
 	}
-	if resp.CronExprs[1] != "0 12 * * *" {
-		t.Errorf("expected second cronExpr '0 12 * * *', got %s", resp.CronExprs[1])
+	if resp.Job.Schedules[1].Expr != "0 12 * * *" {
+		t.Errorf("expected second schedule expr '0 12 * * *', got %s", resp.Job.Schedules[1].Expr)
 	}
 }
 
@@ -993,7 +1008,7 @@ func TestPatchJob_BackwardCompatSingleCronExpr(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp.CronExprs) != 1 || resp.CronExprs[0] != "0 5 * * *" {
-		t.Errorf("expected CronExprs [\"0 5 * * *\"], got %v", resp.CronExprs)
+	if len(resp.Job.Schedules) != 1 || resp.Job.Schedules[0].Expr != "0 5 * * *" {
+		t.Errorf("expected Schedules [\"0 5 * * *\"], got %v", resp.Job.Schedules)
 	}
 }

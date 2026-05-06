@@ -26,6 +26,8 @@ type JobManager interface {
 	CreateJob(name, source, password string, cronExprs []string, retentionDays int, objectLockMode string) (*models.BackupJob, error)
 	RemoveJob(jobID string) bool
 	DeleteJob(jobID, password string, purge bool) error
+	RescheduleJob(jobID string, schedules []models.ScheduleEntry) error
+	UpdateJob(job *models.BackupJob) error
 }
 
 // BackupJobWithStatus is a sanitized version of BackupJob with
@@ -45,6 +47,7 @@ type BackupJobWithStatus struct {
 	CronExprs       []string   `json:"cronExprs,omitempty"`
 	RetryCount      int        `json:"retryCount,omitempty"`
 	NextRetryTime   time.Time  `json:"nextRetryTime,omitempty"`
+	Schedules       []models.ScheduleEntry `json:"schedules,omitempty"`
 }
 
 // CreateJobRequest is the JSON body for creating a new job.
@@ -66,14 +69,27 @@ var enhancedParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Mo
 // sanitizeJob converts a BackupJob to a BackupJobWithStatus, omitting
 // the EncryptionPassword field for safe API responses.
 func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
+	// Build backward-compat CronExprs from Schedules (or use CronExprs directly as fallback)
+	schedules := job.Schedules
+	if len(schedules) == 0 && len(job.CronExprs) > 0 {
+		schedules = make([]models.ScheduleEntry, len(job.CronExprs))
+		for i, e := range job.CronExprs {
+			schedules[i] = models.ScheduleEntry{Expr: e}
+		}
+	}
+	cronExprs := make([]string, len(schedules))
+	for i, s := range schedules {
+		cronExprs[i] = s.Expr
+	}
+
 	nextRun := job.NextRun
-	if nextRun.IsZero() && job.ScheduleEnabled && len(job.CronExprs) > 0 {
+	if nextRun.IsZero() && job.ScheduleEnabled && len(schedules) > 0 {
 		now := time.Now()
 		var nearest time.Time
-		for _, expr := range job.CronExprs {
-			sched, err := standardParser.Parse(expr)
+		for _, sch := range schedules {
+			sched, err := standardParser.Parse(sch.Expr)
 			if err != nil {
-				sched, err = enhancedParser.Parse(expr)
+				sched, err = enhancedParser.Parse(sch.Expr)
 			}
 			if err == nil {
 				candidate := sched.Next(now)
@@ -98,9 +114,10 @@ func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 		NextRun:         nextRun,
 		LastError:       job.LastError,
 		ScheduleEnabled: job.ScheduleEnabled,
-		CronExprs:       job.CronExprs,
+		CronExprs:       cronExprs,
 		RetryCount:      job.RetryCount,
 		NextRetryTime:   job.NextRetryTime,
+		Schedules:       schedules,
 	}
 }
 

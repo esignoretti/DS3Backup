@@ -57,10 +57,19 @@ func (s *APIServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sanitized := sanitizeJob(job)
+
+	// Backward-compat: build cronExprs from Schedules, fallback to CronExprs
+	cronExprs := job.CronExprs
+	if len(job.Schedules) > 0 {
+		cronExprs = make([]string, len(job.Schedules))
+		for i, s := range job.Schedules {
+			cronExprs[i] = s.Expr
+		}
+	}
 	s.writeJSON(w, http.StatusOK, JobDetailResponse{
 		Job:         sanitized,
 		IsScheduled: job.ScheduleEnabled,
-		CronExprs:   job.CronExprs,
+		CronExprs:   cronExprs,
 	})
 }
 
@@ -104,7 +113,7 @@ func (s *APIServer) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
 		return
 	}
-	s.runner.RunJob(jobID)
+	go s.runner.RunJob(jobID)
 	s.writeJSON(w, http.StatusAccepted, BackupTriggerResponse{
 		JobID:     jobID,
 		Triggered: true,
@@ -121,25 +130,44 @@ func (s *APIServer) handlePatchJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		CronExprs *[]string `json:"cronExprs"`
-		CronExpr  *string   `json:"cronExpr"` // Deprecated: use cronExprs
+		CronExprs       *[]string              `json:"cronExprs"`
+		CronExpr        *string                `json:"cronExpr"` // Deprecated: use cronExprs
+		ScheduleEnabled *bool                  `json:"scheduleEnabled"`
+		Schedules       *[]models.ScheduleEntry `json:"schedules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if req.CronExprs != nil {
-		job.CronExprs = *req.CronExprs
-		job.ScheduleEnabled = len(*req.CronExprs) > 0
-	} else if req.CronExpr != nil {
-		// Backward compat: single cronExpr converted to slice
-		if *req.CronExpr != "" {
-			job.CronExprs = []string{*req.CronExpr}
-		} else {
-			job.CronExprs = nil
+	if req.Schedules != nil {
+		if err := s.jobManager.RescheduleJob(jobID, *req.Schedules); err != nil {
+			s.writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
-		job.ScheduleEnabled = *req.CronExpr != ""
+	} else if req.CronExprs != nil || req.CronExpr != nil {
+		var newExprs []string
+		if req.CronExprs != nil {
+			newExprs = *req.CronExprs
+		} else if req.CronExpr != nil && *req.CronExpr != "" {
+			newExprs = []string{*req.CronExpr}
+		}
+		schedules := make([]models.ScheduleEntry, len(newExprs))
+		for i, e := range newExprs {
+			schedules[i] = models.ScheduleEntry{Expr: e}
+		}
+		if err := s.jobManager.RescheduleJob(jobID, schedules); err != nil {
+			s.writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if req.ScheduleEnabled != nil {
+		job.ScheduleEnabled = *req.ScheduleEnabled
+		if err := s.jobManager.UpdateJob(job); err != nil {
+			s.writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})

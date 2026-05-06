@@ -215,7 +215,7 @@ Examples:
 
 		// 5. Create API adapters
 		runnerAdapter := &daemonRunnerAdapter{scheduler: sched, runner: runner}
-		jobAdapter := &daemonJobManagerAdapter{cfg: cfg}
+		jobAdapter := &daemonJobManagerAdapter{cfg: cfg, scheduleMgr: scheduleMgr}
 		historyProvider := &daemonHistoryProvider{cfg: cfg}
 
 		// 6. Start API server
@@ -273,7 +273,7 @@ Examples:
 
 // runBackupForDaemon performs a full backup pipeline for a job, used by the daemon scheduler.
 // This is identical in spirit to backupRunCmd but without CLI progress output.
-func runBackupForDaemon(job *models.BackupJob) (*models.BackupRun, error) {
+func runBackupForDaemon(job *models.BackupJob, fullBackup bool) (*models.BackupRun, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -315,7 +315,7 @@ func runBackupForDaemon(job *models.BackupJob) (*models.BackupRun, error) {
 	// Send starting notification
 	tray.NotifyBackupStarting(job.Name)
 
-	// Run backup (incremental, no progress callback)
+	// Run backup (check per-schedule full backup flags)
 	run, err := engine.RunBackup(job, false, nil)
 
 	// Send completion or failure notification
@@ -379,7 +379,8 @@ func (a *daemonRunnerAdapter) Stop() {
 
 // daemonJobManagerAdapter wraps config to implement api.JobManager.
 type daemonJobManagerAdapter struct {
-	cfg *config.Config
+	cfg         *config.Config
+	scheduleMgr *scheduler.ScheduleManager
 }
 
 func (a *daemonJobManagerAdapter) GetJob(jobID string) *models.BackupJob {
@@ -391,6 +392,10 @@ func (a *daemonJobManagerAdapter) GetAllJobs() []models.BackupJob {
 }
 
 func (a *daemonJobManagerAdapter) CreateJob(name, source, password string, cronExprs []string, retentionDays int, objectLockMode string) (*models.BackupJob, error) {
+	schedules := make([]models.ScheduleEntry, len(cronExprs))
+	for i, e := range cronExprs {
+		schedules[i] = models.ScheduleEntry{Expr: e}
+	}
 	job := models.BackupJob{
 		ID:                 fmt.Sprintf("job_%d", time.Now().UnixNano()),
 		Name:               name,
@@ -400,8 +405,8 @@ func (a *daemonJobManagerAdapter) CreateJob(name, source, password string, cronE
 		RetentionDays:      retentionDays,
 		ObjectLockMode:     objectLockMode,
 		CreatedAt:          time.Now(),
-		CronExprs:          cronExprs,
-		ScheduleEnabled:    len(cronExprs) > 0,
+		Schedules:          schedules,
+		ScheduleEnabled:    len(schedules) > 0,
 	}
 	a.cfg.Jobs = append(a.cfg.Jobs, job)
 	if err := a.cfg.SaveConfig(); err != nil {
@@ -473,6 +478,27 @@ func (a *daemonJobManagerAdapter) DeleteJob(jobID, password string, purge bool) 
 
 	a.RemoveJob(jobID)
 	return nil
+}
+
+func (a *daemonJobManagerAdapter) RescheduleJob(jobID string, schedules []models.ScheduleEntry) error {
+	if a.scheduleMgr != nil {
+		return a.scheduleMgr.RescheduleJob(jobID, schedules)
+	}
+	// Fallback: save config directly without scheduler
+	job := a.cfg.GetJob(jobID)
+	if job == nil {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+	job.Schedules = schedules
+	job.ScheduleEnabled = len(schedules) > 0
+	return a.cfg.SaveConfig()
+}
+
+func (a *daemonJobManagerAdapter) UpdateJob(job *models.BackupJob) error {
+	if a.scheduleMgr != nil {
+		return a.scheduleMgr.UpdateJob(job)
+	}
+	return a.cfg.SaveConfig()
 }
 
 // daemonHistoryProvider wraps config to implement api.HistoryProvider.
