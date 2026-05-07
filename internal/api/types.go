@@ -48,6 +48,7 @@ type BackupJobWithStatus struct {
 	RetryCount      int        `json:"retryCount,omitempty"`
 	NextRetryTime   time.Time  `json:"nextRetryTime,omitempty"`
 	Schedules       []models.ScheduleEntry `json:"schedules,omitempty"`
+	RunInProgress   bool                   `json:"runInProgress,omitempty"`
 }
 
 // CreateJobRequest is the JSON body for creating a new job.
@@ -118,6 +119,7 @@ func sanitizeJob(job *models.BackupJob) BackupJobWithStatus {
 		RetryCount:      job.RetryCount,
 		NextRetryTime:   job.NextRetryTime,
 		Schedules:       schedules,
+		RunInProgress:   job.RunInProgress,
 	}
 }
 

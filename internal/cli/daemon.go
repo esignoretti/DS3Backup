@@ -232,9 +232,9 @@ Examples:
 			log.Printf("API server listening on 127.0.0.1:%d", daemonPort)
 		}
 
-	// 7. Start system tray (macOS with display only)
+	// 7. Start system tray (macOS only)
 	var trayApp *tray.TrayApp
-	if !daemonNoTray && !daemonNoAPI && runtime.GOOS == "darwin" && os.Getenv("DISPLAY") != "" {
+	if !daemonNoTray && !daemonNoAPI && runtime.GOOS == "darwin" {
 		trayApp = tray.NewTrayApp(daemonPort)
 		go func() {
 			if err := trayApp.Run(); err != nil {
@@ -243,8 +243,6 @@ Examples:
 		}()
 		time.Sleep(500 * time.Millisecond)
 		log.Println("System tray started")
-	} else if !daemonNoTray && runtime.GOOS == "darwin" {
-		log.Println("No display available, running in headless mode (use --no-tray to suppress)")
 	}
 
 		log.Printf("Daemon running on port %d", daemonPort)

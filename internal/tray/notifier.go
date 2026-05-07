@@ -14,31 +14,36 @@ func SendNotification(title, message string) error {
 	case "linux":
 		return sendLinuxNotification(title, message)
 	case "windows":
-		// Stub: Windows toast notifications not yet implemented
 		return nil
 	default:
 		return nil
 	}
 }
 
-// sendMacOSNotification sends a notification via osascript on macOS.
+// sendMacOSNotification tries terminal-notifier first, falls back to osascript.
 func sendMacOSNotification(title, message string) error {
+	cmd := exec.Command("terminal-notifier",
+		"-title", title,
+		"-message", message,
+		"-group", "com.ds3backup",
+	)
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
 	script := fmt.Sprintf(`display notification "%s" with title "%s"`, message, title)
-	cmd := exec.Command("osascript", "-e", script)
-	return cmd.Run()
+	return exec.Command("osascript", "-e", script).Run()
 }
 
-// sendLinuxNotification sends a notification via notify-send on Linux.
+// sendLinuxNotification sends a notification via notify-send.
 func sendLinuxNotification(title, message string) error {
-	cmd := exec.Command("notify-send", title, message)
-	return cmd.Run()
+	return exec.Command("notify-send", title, message).Run()
 }
 
 // NotifyBackupComplete sends a desktop notification when a backup completes successfully.
 func NotifyBackupComplete(jobName string, filesProcessed int) {
 	msg := fmt.Sprintf("Backup complete for %s: %d files", jobName, filesProcessed)
 	if err := SendNotification("DS3 Backup", msg); err != nil {
-		// Notifications are best-effort; log failures silently
+		// Best-effort
 	}
 }
 
