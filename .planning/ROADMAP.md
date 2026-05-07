@@ -19,6 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore ✅ Complete
 - [x] **Phase 3.1: UI Scheduling Update** (INSERTED) — Dashboard now shows multi-schedule, retry info, interval expressions; API exposes retry fields ✅ Complete
 - [x] **Phase 3.2: UI Bug Fixes & Polish** — Browse null error, restore deadlock, PIT restore via API, mkdir support, card sizing ✅ Complete
+- [x] **Phase 3.3: Tray Icon & Menu Improvements** — DISPLAY gate fix, status-aware icons, dynamic per-job menu, reliable notifications, RunInProgress ✅ Complete
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
 ## Phase Details
@@ -156,6 +157,21 @@ Plans:
     5. Cards have equal height with actions aligned at bottom
     6. Restore modal includes overwrite, include/exclude filters
 
+### Phase 3.3: Tray Icon & Menu Improvements (SHIPPED)
+**Goal**: Fix macOS tray startup bug (DISPLAY gate), add status-aware icon colors, dynamic per-job menu, reliable notifications, running-job indicator.
+**Depends on**: Phase 3 (desktop UI, tray app)
+**Requirements**: — (ad-hoc fixes)
+**Success Criteria** (what must be TRUE):
+    1. Tray icon appears on macOS (DISPLAY env variable bug fixed)
+    2. Tray icon color changes: idle (blue), running (green), error (red)
+    3. Per-job menu items show ✅/❌/⏳ status and update dynamically
+    4. Jobs added/removed at runtime reflected in menu
+    5. Notifications try terminal-notifier before osascript fallback
+    6. RunInProgress exposed via API for tray consumption
+    7. go build and go test all pass
+
+**Executed**: 1 plan (ad-hoc — implemented directly)
+
 ### Phase 4: Enterprise & Polish (Planned)
 **Goal**: Multi-target storage, advanced monitoring, performance optimization, and security hardening
 **Depends on**: Phase 3
@@ -180,4 +196,5 @@ Phases execute in numeric order: 1 → 1.5 → 2 → 2.5 → 3 → 3.1 → 4
 | 3. Desktop UI | 3/3 executed | ✅ Complete | 2026-04-29 |
 | 3.1. UI Scheduling Update | 2/2 executed | ✅ Complete | 2026-05-04 |
 | 3.2. UI Bug Fixes & Polish | — | ✅ Complete | 2026-05-07 |
+| 3.3. Tray Icon & Menu Improvements | 1/1 executed | ✅ Complete | 2026-05-07 |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |

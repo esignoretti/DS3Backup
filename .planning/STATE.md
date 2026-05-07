@@ -9,13 +9,13 @@ See: .planning/PROJECT.md (not yet created)
 
 ## Current Position
 
-Phase: 3.2 (UI Bug Fixes & Polish)
-Plan: — (ad-hoc fixes)
+Phase: 3.3 (Tray Icon & Menu Improvements)
+Plan: 1 plan executed
 Status: Complete
-Last activity: 2026-05-07 — Browse null error, restore deadlock, point-in-time via API, mkdir support, card sizing, filtering options
+Last activity: 2026-05-07 — DISPLAY gate fix, status-aware icons, dynamic per-job menu, reliable notifications, RunInProgress
 
-Progress: [██████████] 60% (overall project)
-Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. Phase 3.1 complete. Phase 3.2 complete. Next: Phase 4.
+Progress: [██████████] 62% (overall project)
+Note: Phase 1.5-3.3 complete. Next: Phase 4.
 
 ## Performance Metrics
 
@@ -35,6 +35,7 @@ Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete
 | 3. Desktop UI | 3/3 | ✅ Complete | ~4m |
 | 3.1. UI Scheduling Update | 2/2 | ✅ Complete | ~5m |
 | 3.2. UI Bug Fixes & Polish | — | ✅ Complete | — |
+| 3.3. Tray Icon & Menu Improvements | 1/1 | ✅ Complete | ~5m |
 
 ## Accumulated Context
 
