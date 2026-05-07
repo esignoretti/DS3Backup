@@ -376,6 +376,17 @@ ds3backup index rebuild <job-id> --from-s3
 
 ## Changelog
 
+### v0.0.11 (2026-05-07)
+
+**Bug Fixes:**
+- **Tray never starts on macOS** (CRITICAL): `os.Getenv("DISPLAY")` gate used an X11-only env variable never set on standard macOS, preventing the tray from ever appearing — removed the check
+
+**New Features:**
+- **Status-aware tray icon**: Icon changes color to reflect state — blue (idle), green (backup running), red (error). Updates automatically via status refresh loop.
+- **Dynamic per-job tray menu**: Menu items now update every 5 seconds showing ✅ (completed), ❌ (failed), ⏳ (running) status with last-run time in tooltip. Jobs added/removed at runtime are reflected in the menu.
+- **Reliable macOS notifications**: Attempts `terminal-notifier` first (brew-installable, delivers reliably to Notification Center) with `osascript` fallback
+- **RunInProgress API**: Exposed via `BackupJobWithStatus.runInProgress` so tray and dashboard can show running job state
+
 ### v0.0.10 (2026-05-07)
 
 **Bug Fixes:**
