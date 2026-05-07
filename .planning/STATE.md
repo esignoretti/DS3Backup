@@ -9,13 +9,13 @@ See: .planning/PROJECT.md (not yet created)
 
 ## Current Position
 
-Phase: 3.1 of 5 (UI Scheduling Update) — INSERTED
-Plan: 2 of 2 in current phase
+Phase: 3.2 (UI Bug Fixes & Polish)
+Plan: — (ad-hoc fixes)
 Status: Complete
-Last activity: 2026-05-04 — All 2 Phase 3.1 plans executed
+Last activity: 2026-05-07 — Browse null error, restore deadlock, point-in-time via API, mkdir support, card sizing, filtering options
 
 Progress: [██████████] 60% (overall project)
-Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. Phase 3.1 complete. Next: Phase 4.
+Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. Phase 3.1 complete. Phase 3.2 complete. Next: Phase 4.
 
 ## Performance Metrics
 
@@ -34,6 +34,7 @@ Note: Phase 1.5 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete
 | 2.5. Advanced Scheduler | 2/2 | ✅ Complete | ~10m |
 | 3. Desktop UI | 3/3 | ✅ Complete | ~4m |
 | 3.1. UI Scheduling Update | 2/2 | ✅ Complete | ~5m |
+| 3.2. UI Bug Fixes & Polish | — | ✅ Complete | — |
 
 ## Accumulated Context
 

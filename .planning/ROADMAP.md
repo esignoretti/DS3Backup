@@ -18,6 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2.5: Advanced Scheduler** (INSERTED) — Retry logic, overlap prevention, missed-schedule catch-up, multi-schedule per job ✅ Complete
 - [x] **Phase 3: Desktop UI** — Cross-platform tray app with notifications, history visualization, one-click restore ✅ Complete
 - [x] **Phase 3.1: UI Scheduling Update** (INSERTED) — Dashboard now shows multi-schedule, retry info, interval expressions; API exposes retry fields ✅ Complete
+- [x] **Phase 3.2: UI Bug Fixes & Polish** — Browse null error, restore deadlock, PIT restore via API, mkdir support, card sizing ✅ Complete
 - [ ] **Phase 4: Enterprise & Polish** — Multi-target storage, audit logging, advanced monitoring
 
 ## Phase Details
@@ -129,19 +130,31 @@ Plans:
 **Depends on**: Phase 3 (dashboard SPA, API), Phase 2.5 (retry, multi-schedule)
 **Requirements**: UI-01, UI-02
 **Success Criteria** (what must be TRUE):
-   1. Dashboard displays all cron expressions per job (not just the first)
-   2. Dashboard shows retry count and next retry time for jobs with failed scheduled backups
-   3. @every interval expressions display as human-readable "Every Xh" labels
-   4. Add-job modal accepts multiple comma-separated cron expressions
-   5. Reschedule button submits cronExprs array (not deprecated single cronExpr)
-   6. API exposes RetryCount and NextRetryTime in BackupJobWithStatus
-   7. go build and go test all pass
+    1. Dashboard displays all cron expressions per job (not just the first)
+    2. Dashboard shows retry count and next retry time for jobs with failed scheduled backups
+    3. @every interval expressions display as human-readable "Every Xh" labels
+    4. Add-job modal accepts multiple comma-separated cron expressions
+    5. Reschedule button submits cronExprs array (not deprecated single cronExpr)
+    6. API exposes RetryCount and NextRetryTime in BackupJobWithStatus
+    7. go build and go test all pass
 
 **Plans**: 2 plans
 
 Plans:
 - [x] 3.1-01-PLAN.md — API layer: expose retry/multi-schedule fields, @every handling in sanitizeJob ✅ Done
 - [x] 3.1-02-PLAN.md — Dashboard SPA: multi-schedule display, retry info, @every support, cronExprs editing ✅ Done
+
+### Phase 3.2: UI Bug Fixes & Polish (SHIPPED)
+**Goal**: Fix browse null error, restore deadlock, add point-in-time restore via API, mkdir support, card sizing, restore filtering options.
+**Depends on**: Phase 3.1
+**Requirements**: — (ad-hoc fixes)
+**Success Criteria** (what must be TRUE):
+    1. Browse modal shows directories without null error
+    2. Restore from API works for jobs with >8 files (no deadlock)
+    3. Point-in-time restore works via API (backup run selector)
+    4. New folder can be created in browse modal
+    5. Cards have equal height with actions aligned at bottom
+    6. Restore modal includes overwrite, include/exclude filters
 
 ### Phase 4: Enterprise & Polish (Planned)
 **Goal**: Multi-target storage, advanced monitoring, performance optimization, and security hardening
@@ -166,4 +179,5 @@ Phases execute in numeric order: 1 → 1.5 → 2 → 2.5 → 3 → 3.1 → 4
 | 2.5. Advanced Scheduler | 2/2 executed | ✅ Complete | 2026-04-30 |
 | 3. Desktop UI | 3/3 executed | ✅ Complete | 2026-04-29 |
 | 3.1. UI Scheduling Update | 2/2 executed | ✅ Complete | 2026-05-04 |
+| 3.2. UI Bug Fixes & Polish | — | ✅ Complete | 2026-05-07 |
 | 4. Enterprise & Polish | TBD | 📋 Planned | - |

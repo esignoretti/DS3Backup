@@ -1,6 +1,6 @@
 # DS3 Backup
 
-**Version:** 0.0.8
+**Version:** 0.0.10
 
 **DS3 Backup** is a secure, S3-only backup tool with client-side encryption, designed for simplicity and reliability.
 
@@ -375,6 +375,35 @@ ds3backup index rebuild <job-id> --from-s3
   - ⏳ Phase 4.4 Part 2: Parallel optimization (dynamic scaling, bandwidth control)
 
 ## Changelog
+
+### v0.0.10 (2026-05-07)
+
+**Bug Fixes:**
+- **Browse null error**: Nil slices serialized as `null` in JSON causing "Cannot read properties of null" — fixed by initializing with empty slice literals
+- **Restore deadlock**: Synchronous result collection in `runDownloaderPipeline` would deadlock with >8 files (channel buffer + full worker result queue) — fixed by unifying all result collection into a goroutine
+- **API restore ignored `time` parameter**: Backup run selector in UI sent `time` (RFC3339) but handler never parsed it — added `TargetTime` to `RestoreOptions`, handler parses and passes to restore provider which calls `GetRunByTime` + `GetEntriesForRun`
+
+**New Features:**
+- **Point-in-time restore via API**: Select a specific backup run from the dropdown in the restore modal
+- **Filtering options in restore modal**: Overwrite toggle, include/exclude pattern fields
+- **New Folder in browse modal**: `POST /api/v1/browse/mkdir` endpoint + "New Folder" input/button in directory browser
+- **Equal card heights**: Cards now use `height:100%` with `flex:1` body and `margin-top:auto` on actions/history toggle
+
+**CLI:**
+- `ds3backup restore run` — `--include`/`--exclude` patterns, `--overwrite`, `--time` now work via API as well
+
+### v0.0.9 (2026-05-06)
+
+**New Features:**
+- **Per-expression full backup**: `ScheduleEntry` struct with `FullBackup bool` per cron expression — each schedule can independently be incremental or full
+- **Restore API endpoint**: `POST /api/v1/restore/{id}` with password validation against `job.EncryptionPassword`, fresh engine per request
+- **UI schedule modal**: Per-row `[I]`/`[F]` toggle, single "+ Add Schedule" button, restore error shows actual API message
+- **CLI multi-cron**: `job schedule` accepts multiple `--cron` flags via `StringSliceVar`
+- **API expose full backup flag**: `ScheduleEntry.FullBackup` in `BackupJobWithStatus.Schedules`
+
+**Breaking (internal):**
+- `BackupJob.CronExprs []string` → `BackupJob.Schedules []ScheduleEntry` with backward-compat unmarshal
+- `runBackupFn` signature changed to `func(job *models.BackupJob, fullBackup bool) (*models.BackupRun, error)`
 
 ### v0.0.5 (2026-04-26)
 
