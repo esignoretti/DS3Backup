@@ -154,6 +154,11 @@ type HistoryProvider interface {
 	GetJobHistory(jobID string, limit int) ([]*models.BackupRun, error)
 }
 
+// RestoreProvider abstracts backup restore execution.
+type RestoreProvider interface {
+	Restore(jobID string, opts *models.RestoreOptions) (*models.RestoreResult, error)
+}
+
 // HistoryResponse is the response for the GET /api/v1/jobs/{id}/history endpoint.
 type HistoryResponse struct {
 	JobID string             `json:"jobId"`

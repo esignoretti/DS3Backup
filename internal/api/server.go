@@ -19,19 +19,20 @@ type APIServer struct {
 	runner          BackupRunner
 	jobManager      JobManager
 	historyProvider HistoryProvider
+	restoreProvider RestoreProvider
 	logPath         string
 	server          *http.Server
 	mu              sync.RWMutex
 	startTime       time.Time
 }
 
-// NewAPIServer creates a new APIServer with the given port and dependencies.
-func NewAPIServer(port int, runner BackupRunner, jobManager JobManager, historyProvider HistoryProvider, logPath string) *APIServer {
+func NewAPIServer(port int, runner BackupRunner, jobManager JobManager, historyProvider HistoryProvider, restoreProvider RestoreProvider, logPath string) *APIServer {
 	return &APIServer{
 		port:            port,
 		runner:          runner,
 		jobManager:      jobManager,
 		historyProvider: historyProvider,
+		restoreProvider: restoreProvider,
 		logPath:         logPath,
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/config"
 	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/index"
+	"github.com/esignoretti/ds3backup/internal/restore"
 	"github.com/esignoretti/ds3backup/internal/s3client"
 	"github.com/esignoretti/ds3backup/internal/scheduler"
 	"github.com/esignoretti/ds3backup/internal/tray"
@@ -217,12 +218,13 @@ Examples:
 		runnerAdapter := &daemonRunnerAdapter{scheduler: sched, runner: runner}
 		jobAdapter := &daemonJobManagerAdapter{cfg: cfg, scheduleMgr: scheduleMgr}
 		historyProvider := &daemonHistoryProvider{cfg: cfg}
+		restoreProvider := &daemonRestoreProvider{cfg: cfg}
 
 		// 6. Start API server
 		var apiServer *api.APIServer
 		if !daemonNoAPI {
 			logPath := filepath.Join(configDir, "ds3backup.log")
-			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyProvider, logPath)
+			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyProvider, restoreProvider, logPath)
 			if err := apiServer.Start(); err != nil {
 				removePIDFile()
 				return fmt.Errorf("failed to start API server: %w", err)
@@ -521,6 +523,65 @@ func (h *daemonHistoryProvider) GetJobHistory(jobID string, limit int) ([]*model
 	}
 	defer idx.Close()
 	return idx.GetBackupHistory(jobID, limit)
+}
+
+// daemonRestoreProvider implements api.RestoreProvider.
+type daemonRestoreProvider struct {
+	cfg *config.Config
+}
+
+func (p *daemonRestoreProvider) Restore(jobID string, opts *models.RestoreOptions) (*models.RestoreResult, error) {
+	job := p.cfg.GetJob(jobID)
+	if job == nil {
+		return nil, fmt.Errorf("job not found: %s", jobID)
+	}
+
+	s3Client, err := s3client.NewClient(p.cfg.S3)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create S3 client: %w", err)
+	}
+
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	indexDir := filepath.Join(configDir, "index", jobID)
+	if err := os.MkdirAll(indexDir, 0700); err != nil {
+		return nil, err
+	}
+
+	indexDB, err := index.OpenIndexDB(indexDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open index: %w", err)
+	}
+	defer indexDB.Close()
+
+	cryptoEngine, err := crypto.NewCryptoEngine(job.EncryptionPassword, p.cfg.Encryption.Salt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create crypto engine: %w", err)
+	}
+
+	engine := restore.NewRestoreEngine(p.cfg, s3Client, indexDB, cryptoEngine, jobID)
+
+	if !opts.TargetTime.IsZero() {
+		targetRun, err := indexDB.GetRunByTime(jobID, opts.TargetTime)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find backup at specified time: %w", err)
+		}
+		if targetRun == nil {
+			return nil, fmt.Errorf("no backup found at or before %s", opts.TargetTime.Format(time.RFC3339))
+		}
+		entries, err := indexDB.GetEntriesForRun(jobID, targetRun.RunTime)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get entries: %w", err)
+		}
+		if len(entries) == 0 {
+			return &models.RestoreResult{}, nil
+		}
+		return engine.RestoreEntries(jobID, opts, nil, entries)
+	}
+
+	return engine.Restore(jobID, opts)
 }
 
 // daemonStatusCmd represents the `ds3backup daemon status` command.

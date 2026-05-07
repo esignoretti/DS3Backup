@@ -201,6 +201,62 @@ func (s *APIServer) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+func (s *APIServer) handleRestore(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
+
+	var req struct {
+		Password        string   `json:"password"`
+		Path            string   `json:"path,omitempty"`
+		Time            string   `json:"time,omitempty"`
+		Overwrite       bool     `json:"overwrite,omitempty"`
+		IncludePatterns []string `json:"includePatterns,omitempty"`
+		ExcludePatterns []string `json:"excludePatterns,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Password == "" {
+		s.writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	job := s.jobManager.GetJob(jobID)
+	if job == nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("job not found: %s", jobID))
+		return
+	}
+	if req.Password != job.EncryptionPassword {
+		s.writeError(w, http.StatusForbidden, "incorrect password")
+		return
+	}
+
+	opts := &models.RestoreOptions{
+		DestinationPath: req.Path,
+		Overwrite:       req.Overwrite,
+		IncludePatterns: req.IncludePatterns,
+		ExcludePatterns: req.ExcludePatterns,
+		Concurrency:     4,
+	}
+
+	if req.Time != "" {
+		t, err := time.Parse(time.RFC3339, req.Time)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, "invalid time format (use RFC3339)")
+			return
+		}
+		opts.TargetTime = t
+	}
+
+	result, err := s.restoreProvider.Restore(jobID, opts)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
 func (s *APIServer) handleGetJobHistory(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
 
@@ -280,8 +336,8 @@ func (s *APIServer) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var dirs []string
-	var files []string
+	dirs := make([]string, 0)
+	files := make([]string, 0)
 	for _, e := range entries {
 		name := e.Name()
 		if name[0] == '.' {
@@ -305,4 +361,25 @@ func (s *APIServer) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		"dirs":   dirs,
 		"files":  files,
 	})
+}
+
+func (s *APIServer) handleMkdir(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Path == "" || req.Name == "" {
+		s.writeError(w, http.StatusBadRequest, "path and name are required")
+		return
+	}
+	dirPath := filepath.Join(req.Path, req.Name)
+	if err := os.Mkdir(dirPath, 0755); err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("cannot create directory: %s", err.Error()))
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"path": dirPath})
 }

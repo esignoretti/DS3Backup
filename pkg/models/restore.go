@@ -1,13 +1,16 @@
 package models
 
+import "time"
+
 // RestoreOptions holds restore configuration
 type RestoreOptions struct {
-	DestinationPath string   // Empty = restore to original paths
-	DryRun          bool     // Preview only
-	Overwrite       bool     // Overwrite existing (default: false = skip)
-	IncludePatterns []string // Glob patterns to include
-	ExcludePatterns []string // Glob patterns to exclude
-	Concurrency     int      // Number of parallel workers (default: 8)
+	DestinationPath string    // Empty = restore to original paths
+	DryRun          bool      // Preview only
+	Overwrite       bool      // Overwrite existing (default: false = skip)
+	IncludePatterns []string  // Glob patterns to include
+	ExcludePatterns []string  // Glob patterns to exclude
+	Concurrency     int       // Number of parallel workers (default: 8)
+	TargetTime      time.Time // Restore from specific backup run time (zero = latest)
 }
 
 // RestoreProgress holds progress information during restore

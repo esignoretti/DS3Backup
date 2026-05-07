@@ -112,55 +112,34 @@ func (e *RestoreEngine) runDownloaderPipeline(entries []*models.FileEntry, opts 
 		Errors:       []string{},
 	}
 
-	if tracker != nil {
-		// Collect results with mutex + tracker updates
-		var mu sync.Mutex
-		done := make(chan struct{})
-		go func() {
-			for res := range downloader.Results() {
-				if res.Skipped {
-					mu.Lock()
-					result.FilesSkipped++
-					mu.Unlock()
-					tracker.Update(res.Entry.Path, res.Bytes, true)
-				} else if res.Success {
-					mu.Lock()
-					result.FilesRestored++
-					result.BytesRestored += res.Bytes
-					if len(res.Warnings) > 0 {
-						result.Warnings = append(result.Warnings, res.Warnings...)
-					}
-					mu.Unlock()
-					tracker.Update(res.Entry.Path, res.Bytes, false)
-				} else {
-					mu.Lock()
-					result.FilesFailed++
-					if res.Error != nil {
-						result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
-					}
-					mu.Unlock()
+	var mu sync.Mutex
+	done := make(chan struct{})
+	go func() {
+		for res := range downloader.Results() {
+			mu.Lock()
+			if res.Skipped {
+				result.FilesSkipped++
+			} else if res.Success {
+				result.FilesRestored++
+				result.BytesRestored += res.Bytes
+				if len(res.Warnings) > 0 {
+					result.Warnings = append(result.Warnings, res.Warnings...)
+				}
+			} else {
+				result.FilesFailed++
+				if res.Error != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
 				}
 			}
-			close(done)
-		}()
-
-		// Submit jobs
-		for _, entry := range filesToRestore {
-			destPath := e.getDestinationPath(entry, opts)
-			downloader.Submit(&Job{
-				Entry:    entry,
-				DestPath: destPath,
-				IsBatch:  entry.IsInBatch,
-				BatchID:  entry.BatchID,
-			})
+			mu.Unlock()
+			if tracker != nil {
+				tracker.Update(res.Entry.Path, res.Bytes, res.Skipped)
+			}
 		}
+		close(done)
+	}()
 
-		downloader.Stop()
-		<-done
-		return result, nil
-	}
-
-	// No tracker: synchronous result collection
+	// Submit jobs
 	for _, entry := range filesToRestore {
 		destPath := e.getDestinationPath(entry, opts)
 		downloader.Submit(&Job{
@@ -171,31 +150,8 @@ func (e *RestoreEngine) runDownloaderPipeline(entries []*models.FileEntry, opts 
 		})
 	}
 
-	processed := 0
-	total := len(filesToRestore)
-	for processed < total {
-		select {
-		case res := <-downloader.Results():
-			processed++
-			if res.Skipped {
-				result.FilesSkipped++
-			} else if res.Success {
-				result.FilesRestored++
-				result.BytesRestored += res.Bytes
-				result.Warnings = append(result.Warnings, res.Warnings...)
-			} else {
-				result.FilesFailed++
-				if res.Error != nil {
-					result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", res.Entry.Path, res.Error))
-				}
-			}
-		case <-ctx.Done():
-			downloader.Stop()
-			return result, ctx.Err()
-		}
-	}
-
 	downloader.Stop()
+	<-done
 	return result, nil
 }
 
