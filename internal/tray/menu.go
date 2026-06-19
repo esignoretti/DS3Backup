@@ -38,22 +38,30 @@ func setupMenu(t *TrayApp) {
 
 	systray.AddSeparator()
 
-	runBackupItem := systray.AddMenuItem("▶ Run Backup...", "Trigger a backup for a specific job")
+	// "Run Backup" as a submenu with per-job clickable items
+	runBackupItem := systray.AddMenuItem("Run Backup ▸", "Select a job to back up")
 	t.menuItems["runBackup"] = &menuItem{item: runBackupItem}
 
 	systray.AddSeparator()
 
-	stopSchedulerItem := systray.AddMenuItem("⏹ Stop Scheduler", "Stop the scheduler")
+	// Per-job status section label
+	jobsHeader := systray.AddMenuItem("Jobs", "Backup job status overview")
+	t.menuItems["jobsHeader"] = &menuItem{item: jobsHeader}
+	jobsHeader.Disable()
+
+	systray.AddSeparator()
+
+	stopSchedulerItem := systray.AddMenuItem("Stop Scheduler", "Stop the scheduler")
 	t.menuItems["stopScheduler"] = &menuItem{item: stopSchedulerItem}
 
 	systray.AddSeparator()
 
-	dashboardItem := systray.AddMenuItem("📊 Open Dashboard", "Open the web dashboard")
+	dashboardItem := systray.AddMenuItem("Open Dashboard", "Open the web dashboard")
 	t.menuItems["dashboard"] = &menuItem{item: dashboardItem}
 
 	systray.AddSeparator()
 
-	quitItem := systray.AddMenuItem("❌ Quit", "Quit DS3 Backup daemon")
+	quitItem := systray.AddMenuItem("Quit", "Quit DS3 Backup daemon")
 	t.menuItems["quit"] = &menuItem{item: quitItem}
 
 	go t.refreshStatusLoop()
@@ -100,9 +108,9 @@ func (t *TrayApp) refreshStatus() {
 
 	if stopItem, ok := t.menuItems["stopScheduler"]; ok {
 		if status.SchedulerRunning {
-			stopItem.item.SetTitle("⏹ Stop Scheduler")
+			stopItem.item.SetTitle("Stop Scheduler")
 		} else {
-			stopItem.item.SetTitle("▶ Start Scheduler")
+			stopItem.item.SetTitle("Start Scheduler")
 		}
 	}
 
@@ -132,59 +140,89 @@ func (t *TrayApp) refreshStatus() {
 }
 
 // refreshJobMenuItems updates per-job menu items on every poll cycle.
-// Creates items for new jobs, updates titles for existing ones.
+// Creates two groups per job:
+//   1. A disabled status item (read-only, showing ✅/❌/⏳ status)
+//   2. A clickable sub-item under "▶ Run Backup..." to trigger that job
 // systray does not support removing items, so removed jobs are disabled.
 func (t *TrayApp) refreshJobMenuItems(jobs []api.BackupJobWithStatus) {
-	// Build set of current job IDs
+	// "Run Backup..." submenu items
+	runBackupParent, hasRunBackup := t.menuItems["runBackup"]
+
 	currentIDs := make(map[string]bool)
 	for _, job := range jobs {
 		currentIDs[job.ID] = true
 	}
 
-	// Remove stale entries from tracking map
-	for id := range t.jobRunItems {
+	// Garbage-collect stale tracking entries
+	for id := range t.jobStatusItems {
 		if !currentIDs[id] {
-			delete(t.jobRunItems, id)
+			delete(t.jobStatusItems, id)
+		}
+	}
+	for id := range t.runBackupItems {
+		if !currentIDs[id] {
+			delete(t.runBackupItems, id)
 		}
 	}
 
-	// Add or update items
 	for _, job := range jobs {
-		prefix := "▶"
-		statusSuffix := ""
+		statusPrefix := "▶"
 		if job.RunInProgress {
-			prefix = "⏳"
-			statusSuffix = " (running)"
+			statusPrefix = "⏳"
 		} else if job.LastError != "" && job.LastRun != nil {
-			prefix = "❌"
+			statusPrefix = "❌"
 		} else if job.LastRun != nil {
-			prefix = "✅"
+			statusPrefix = "✅"
 		}
 
-		title := fmt.Sprintf("%s Backup: %s%s", prefix, job.Name, statusSuffix)
-		tooltip := fmt.Sprintf("Job: %s", job.ID)
+		statusTitle := fmt.Sprintf("%s  %s", statusPrefix, job.Name)
+		statusTooltip := fmt.Sprintf("Job: %s", job.ID)
 		if job.LastRun != nil {
-			tooltip += fmt.Sprintf(" — Last: %s", job.LastRun.Format("Jan 2 15:04"))
+			statusTooltip += fmt.Sprintf(" — Last: %s", job.LastRun.Format("Jan 2 15:04"))
+		}
+		if job.LastError != "" {
+			statusTooltip += fmt.Sprintf(" — Error: %s", job.LastError)
 		}
 
-		if existing, ok := t.jobRunItems[job.ID]; ok {
-			existing.SetTitle(title)
-			existing.SetTooltip(tooltip)
+		// Disabled status item (read-only)
+		if existing, ok := t.jobStatusItems[job.ID]; ok {
+			existing.SetTitle(statusTitle)
+			existing.SetTooltip(statusTooltip)
 		} else {
-			item := systray.AddMenuItem(title, tooltip)
-			t.jobRunItems[job.ID] = item
-			go func(jobID string, menuItem *systray.MenuItem) {
-				for range menuItem.ClickedCh {
-					t.triggerBackup(jobID)
-				}
-			}(job.ID, item)
+			item := systray.AddMenuItem(statusTitle, statusTooltip)
+			item.Disable()
+			t.jobStatusItems[job.ID] = item
+		}
+
+		// Clickable run-backup submenu item
+		if hasRunBackup {
+			rbTitle := fmt.Sprintf("Backup “%s”", job.Name)
+			rbTooltip := fmt.Sprintf("Trigger backup for job %s", job.ID)
+			if existing, ok := t.runBackupItems[job.ID]; ok {
+				existing.SetTitle(rbTitle)
+				existing.SetTooltip(rbTooltip)
+			} else {
+				item := runBackupParent.item.AddSubMenuItem(rbTitle, rbTooltip)
+				t.runBackupItems[job.ID] = item
+				go func(jobID string, menuItem *systray.MenuItem) {
+					for range menuItem.ClickedCh {
+						t.triggerBackup(jobID)
+					}
+				}(job.ID, item)
+			}
 		}
 	}
 
 	// Disable items for removed jobs
-	for id, item := range t.jobRunItems {
+	for id, item := range t.jobStatusItems {
 		if !currentIDs[id] {
 			item.SetTitle(fmt.Sprintf("⏻ %s (removed)", id))
+			item.Disable()
+		}
+	}
+	for id, item := range t.runBackupItems {
+		if !currentIDs[id] {
+			item.SetTitle(fmt.Sprintf("Removed: %s", id))
 			item.Disable()
 		}
 	}

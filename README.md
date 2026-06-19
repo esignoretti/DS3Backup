@@ -376,6 +376,17 @@ ds3backup index rebuild <job-id> --from-s3
 
 ## Changelog
 
+### v0.0.12 (2026-05-07)
+
+**Bug Fixes:**
+- **SIGTRAP crash on tray startup**: `systray.Run()` calls into AppKit C/ObjC code that emits OS-level `SIGTRAP` on some macOS configurations — Go's `recover()` cannot catch native signals. Fixed by running the tray in an isolated **subprocess** (`ds3backup tray start --port N`), managed by `TraySubprocess` with graceful stop (SIGTERM + 3s kill timeout)
+- **Daemon always stayed in foreground**: Old `trayEnabled` guard prevented background forking when tray was active — removed now that tray runs as subprocess; `ds3backup daemon start` correctly daemonizes
+- **Per-job menu items triggered backup on click**: Status items (✅/❌/⏳) are now read-only (disabled); backup triggering moved to a "Run Backup ▸" submenu with per-job items
+
+**UI Improvements:**
+- **Dashboard redesigned with Cubbit design system**: Dark background (`#040404`), Titillium Web headings + Source Sans 3 body, blue accent (`#0065FF`), 3px gradient top bars on cards, consistent spacing via CSS custom properties
+- **Tray menu cleaned up**: Removed emoji clutter, cleaner labels ("Run Backup ▸", "Stop Scheduler", "Open Dashboard", "Quit"), "Jobs" section header with disabled status items
+
 ### v0.0.11 (2026-05-07)
 
 **Bug Fixes:**

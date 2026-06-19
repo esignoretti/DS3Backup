@@ -140,14 +140,13 @@ Examples:
   ds3backup daemon start --no-tray
   ds3backup daemon start --port 9100`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// If not in foreground mode, fork to background
+		// If not in foreground mode, fork to background (tray runs as subprocess)
 		if !daemonForeground {
 			execPath, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("failed to get executable path: %w", err)
 			}
 
-			// Build args for background process
 			bgArgs := []string{"daemon", "start", "--foreground"}
 			if daemonPort != 0 {
 				bgArgs = append(bgArgs, "--port", fmt.Sprintf("%d", daemonPort))
@@ -168,7 +167,6 @@ Examples:
 				return fmt.Errorf("failed to start daemon: %w", err)
 			}
 
-			// Wait briefly for daemon to start
 			time.Sleep(500 * time.Millisecond)
 			log.Printf("Daemon started (PID: %d)", cmd.Process.Pid)
 			return nil
@@ -187,87 +185,87 @@ Examples:
 
 	log.Println("Starting daemon...")
 
-		// Determine port from flag or config
-		if daemonPort == 0 {
-			daemonPort = cfg.Daemon.APIPort
-		}
-		if daemonPort == 0 {
-			daemonPort = api.DefaultAPIPort
-		}
-
-		// Write PID file
-		if err := writePIDFile(); err != nil {
-			log.Printf("Warning: failed to write PID file: %v", err)
-		}
-
-		// 1. Create scheduler
-		sched := scheduler.NewScheduler(time.Duration(cfg.Daemon.SchedulerInterval)*time.Second, log.Default())
-
-		// 2. Create backup job runner (calls the actual backup pipeline)
-		runner := scheduler.NewBackupJobRunner(cfg, cfg.GetJob, runBackupForDaemon)
-
-		// 3. Create schedule manager and load schedules
-		scheduleMgr := scheduler.NewScheduleManager(cfg, sched, runner)
-		scheduleMgr.LoadAllSchedules()
-
-		// 4. Start scheduler
-		sched.Start()
-		log.Printf("Scheduler started (interval: %ds)", cfg.Daemon.SchedulerInterval)
-
-		// 5. Create API adapters
-		runnerAdapter := &daemonRunnerAdapter{scheduler: sched, runner: runner}
-		jobAdapter := &daemonJobManagerAdapter{cfg: cfg, scheduleMgr: scheduleMgr}
-		historyProvider := &daemonHistoryProvider{cfg: cfg}
-		restoreProvider := &daemonRestoreProvider{cfg: cfg}
-
-		// 6. Start API server
-		var apiServer *api.APIServer
-		if !daemonNoAPI {
-			logPath := filepath.Join(configDir, "ds3backup.log")
-			apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyProvider, restoreProvider, logPath)
-			if err := apiServer.Start(); err != nil {
-				removePIDFile()
-				return fmt.Errorf("failed to start API server: %w", err)
-			}
-			log.Printf("API server listening on 127.0.0.1:%d", daemonPort)
-		}
-
-	// 7. Start system tray (macOS only)
-	var trayApp *tray.TrayApp
-	if !daemonNoTray && !daemonNoAPI && runtime.GOOS == "darwin" {
-		trayApp = tray.NewTrayApp(daemonPort)
-		go func() {
-			if err := trayApp.Run(); err != nil {
-				log.Printf("System tray error: %v", err)
-			}
-		}()
-		time.Sleep(500 * time.Millisecond)
-		log.Println("System tray started")
+	// Determine port from flag or config
+	if daemonPort == 0 {
+		daemonPort = cfg.Daemon.APIPort
+	}
+	if daemonPort == 0 {
+		daemonPort = api.DefaultAPIPort
 	}
 
-		log.Printf("Daemon running on port %d", daemonPort)
+	// Write PID file
+	if err := writePIDFile(); err != nil {
+		log.Printf("Warning: failed to write PID file: %v", err)
+	}
 
-		// 8. Signal handling
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
+	// 1. Create scheduler
+	sched := scheduler.NewScheduler(time.Duration(cfg.Daemon.SchedulerInterval)*time.Second, log.Default())
 
-		// 9. Graceful shutdown (reverse order: tray -> API -> scheduler)
-		log.Println("Shutting down daemon...")
-		if trayApp != nil {
-			trayApp.Stop()
-			log.Println("System tray stopped")
+	// 2. Create backup job runner (calls the actual backup pipeline)
+	runner := scheduler.NewBackupJobRunner(cfg, cfg.GetJob, runBackupForDaemon)
+
+	// 3. Create schedule manager and load schedules
+	scheduleMgr := scheduler.NewScheduleManager(cfg, sched, runner)
+	scheduleMgr.LoadAllSchedules()
+
+	// 4. Start scheduler
+	sched.Start()
+	log.Printf("Scheduler started (interval: %ds)", cfg.Daemon.SchedulerInterval)
+
+	// 5. Create API adapters
+	runnerAdapter := &daemonRunnerAdapter{scheduler: sched, runner: runner}
+	jobAdapter := &daemonJobManagerAdapter{cfg: cfg, scheduleMgr: scheduleMgr}
+	historyProvider := &daemonHistoryProvider{cfg: cfg}
+	restoreProvider := &daemonRestoreProvider{cfg: cfg}
+
+	// 6. Start API server
+	var apiServer *api.APIServer
+	if !daemonNoAPI {
+		logPath := filepath.Join(configDir, "ds3backup.log")
+		apiServer = api.NewAPIServer(daemonPort, runnerAdapter, jobAdapter, historyProvider, restoreProvider, logPath)
+		if err := apiServer.Start(); err != nil {
+			removePIDFile()
+			return fmt.Errorf("failed to start API server: %w", err)
 		}
-		if apiServer != nil {
-			if err := apiServer.Stop(); err != nil {
-				log.Printf("API server stop error: %v", err)
-			}
-		}
-		sched.Stop()
-		removePIDFile()
-		log.Println("Daemon stopped")
+		log.Printf("API server listening on 127.0.0.1:%d", daemonPort)
+	}
 
-		return nil
+	// 7. Start system tray (macOS GUI only) — in a subprocess for crash isolation
+	var trayProcess *tray.TraySubprocess
+	if !daemonNoTray && !daemonNoAPI && runtime.GOOS == "darwin" && !tray.IsHeadless() {
+		trayProcess = tray.NewTraySubprocess(daemonPort)
+		if err := trayProcess.Start(); err != nil {
+			log.Printf("System tray error: %v", err)
+		} else {
+			log.Println("System tray started (subprocess)")
+		}
+	} else if !daemonNoTray && runtime.GOOS == "darwin" && tray.IsHeadless() {
+		log.Println("No GUI session available, running without tray (use --no-tray to suppress)")
+	}
+
+	log.Printf("Daemon running on port %d", daemonPort)
+
+	// 8. Signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	// 9. Graceful shutdown (reverse order: tray -> API -> scheduler)
+	log.Println("Shutting down daemon...")
+	if trayProcess != nil {
+		trayProcess.Stop()
+		log.Println("System tray stopped")
+	}
+	if apiServer != nil {
+		if err := apiServer.Stop(); err != nil {
+			log.Printf("API server stop error: %v", err)
+		}
+	}
+	sched.Stop()
+	removePIDFile()
+	log.Println("Daemon stopped")
+
+	return nil
 	},
 }
 

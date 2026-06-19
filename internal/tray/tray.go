@@ -3,10 +3,25 @@ package tray
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/getlantern/systray"
 )
+
+// IsHeadless returns true when no GUI session is available.
+// On macOS this detects SSH sessions, CI environments, and other headless
+// contexts where AppKit/Cocoa APIs would crash the process.
+func IsHeadless() bool {
+	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_CLIENT") != "" {
+		return true
+	}
+	if os.Getenv("CI") != "" {
+		return true
+	}
+	return false
+}
 
 // TrayState represents the tray icon visual state.
 type TrayState int
@@ -52,34 +67,70 @@ var iconError = []byte{
 
 // TrayApp manages the macOS system tray lifecycle, menu, and state.
 type TrayApp struct {
-	running     bool
-	apiBaseURL  string
-	mu          sync.Mutex
-	menuItems   map[string]*menuItem
-	stopChan    chan struct{}
-	jobRunItems map[string]*systray.MenuItem
-	state       TrayState
+	running        bool
+	apiBaseURL     string
+	mu             sync.Mutex
+	menuItems      map[string]*menuItem
+	stopChan       chan struct{}
+	jobStatusItems map[string]*systray.MenuItem
+	runBackupItems map[string]*systray.MenuItem
+	state          TrayState
 }
 
 // NewTrayApp creates a new TrayApp connected to the daemon API on the given port.
 func NewTrayApp(apiPort int) *TrayApp {
 	return &TrayApp{
-		apiBaseURL:  fmt.Sprintf("http://127.0.0.1:%d", apiPort),
-		menuItems:   make(map[string]*menuItem),
-		stopChan:    make(chan struct{}),
-		jobRunItems: make(map[string]*systray.MenuItem),
-		state:       StateIdle,
+		apiBaseURL:     fmt.Sprintf("http://127.0.0.1:%d", apiPort),
+		menuItems:      make(map[string]*menuItem),
+		stopChan:       make(chan struct{}),
+		jobStatusItems: make(map[string]*systray.MenuItem),
+		runBackupItems: make(map[string]*systray.MenuItem),
+		state:          StateIdle,
 	}
 }
 
-// Run starts the system tray application. This call blocks until systray.Quit() is called.
+// Run starts the system tray application in a goroutine with panic recovery.
+// Returns after 5s if the tray starts successfully, or immediately if it crashes.
+// NOTE: SIGTRAP/SIGSEGV from C/ObjC code cannot be caught by recover().
+// For crash isolation, use RunBlocking() in a subprocess instead.
 func (t *TrayApp) Run() error {
+	started := make(chan struct{})
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("CRASH: systray.Run panicked: %v", r)
+			}
+			close(started)
+		}()
+		systray.Run(t.onReady, t.onExit)
+	}()
+
+	select {
+	case <-started:
+		t.mu.Lock()
+		t.running = false
+		t.mu.Unlock()
+		return fmt.Errorf("systray exited or crashed")
+	case <-time.After(5 * time.Second):
+		t.mu.Lock()
+		t.running = true
+		t.mu.Unlock()
+		return nil
+	}
+}
+
+// RunBlocking starts the system tray application and blocks until systray.Quit() is called.
+// Intended for use in a subprocess where C/ObjC crashes won't affect the daemon.
+func (t *TrayApp) RunBlocking() {
 	t.mu.Lock()
 	t.running = true
 	t.mu.Unlock()
 
 	systray.Run(t.onReady, t.onExit)
-	return nil
+
+	t.mu.Lock()
+	t.running = false
+	t.mu.Unlock()
 }
 
 // Stop terminates the system tray application and cleans up.
