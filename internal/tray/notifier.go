@@ -2,9 +2,17 @@ package tray
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"runtime"
 )
+
+func init() {
+	// Warn if terminal-notifier is missing — without it "Show" button opens Finder
+	if _, err := exec.LookPath("terminal-notifier"); err != nil {
+		log.Println("TIP: Install terminal-notifier for actionable notifications: brew install terminal-notifier")
+	}
+}
 
 var dashboardURL string
 
@@ -29,7 +37,8 @@ func SendNotification(title, message string) error {
 }
 
 // sendMacOSNotification tries terminal-notifier first, falls back to osascript.
-// The -open and -activate flags make the "Show" button open the dashboard.
+// With terminal-notifier, -open sets the "Show" button to open the dashboard.
+// Without it, osascript's notification always opens Finder — no way to override.
 func sendMacOSNotification(title, message string) error {
 	args := []string{
 		"-title", title,
@@ -43,7 +52,12 @@ func sendMacOSNotification(title, message string) error {
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
-	script := fmt.Sprintf(`display notification "%s" with title "%s"`, message, title)
+	// osascript: embed URL in message since "Show" button can't be customized
+	msg := message
+	if dashboardURL != "" {
+		msg = message + " — " + dashboardURL
+	}
+	script := fmt.Sprintf(`display notification "%s" with title "%s"`, msg, title)
 	return exec.Command("osascript", "-e", script).Run()
 }
 

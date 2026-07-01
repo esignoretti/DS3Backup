@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -258,10 +259,13 @@ func (t *TrayApp) handleMenuClicks() {
 			t.toggleScheduler()
 		case <-t.menuItems["quit"].item.ClickedCh:
 			log.Println("Quit requested from tray menu — shutting down daemon")
-			// Fire-and-forget: signal daemon to shut down, then exit tray.
-			// Daemon's shutdown sequence handles killing this subprocess if still alive.
+			// Fire-and-forget: signal daemon to shut down.
+			// Use os.Exit(0) instead of systray.Quit() because systray calls
+			// into AppKit CGo which has thread affinity — calling Quit from a
+			// background goroutine is unreliable on macOS.
 			http.Post(t.apiBaseURL+"/api/v1/shutdown", "application/json", nil)
-			systray.Quit()
+			log.Println("Exiting tray")
+			os.Exit(0)
 		case <-t.menuItems["dashboard"].item.ClickedCh:
 			t.openDashboard()
 		case <-t.menuItems["runBackup"].item.ClickedCh:
