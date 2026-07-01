@@ -198,6 +198,9 @@ Examples:
 		log.Printf("Warning: failed to write PID file: %v", err)
 	}
 
+	// Set dashboard URL for notification "Show" button
+	tray.SetDashboardURL(fmt.Sprintf("http://127.0.0.1:%d/", daemonPort))
+
 	// 1. Create scheduler
 	sched := scheduler.NewScheduler(time.Duration(cfg.Daemon.SchedulerInterval)*time.Second, log.Default())
 

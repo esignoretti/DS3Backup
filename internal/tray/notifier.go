@@ -6,6 +6,14 @@ import (
 	"runtime"
 )
 
+var dashboardURL string
+
+// SetDashboardURL configures the URL that notification "Show" buttons open.
+// Should be called before any notification is sent (e.g., from daemon startup).
+func SetDashboardURL(url string) {
+	dashboardURL = url
+}
+
 // SendNotification sends a desktop notification using platform-specific APIs.
 func SendNotification(title, message string) error {
 	switch runtime.GOOS {
@@ -21,12 +29,17 @@ func SendNotification(title, message string) error {
 }
 
 // sendMacOSNotification tries terminal-notifier first, falls back to osascript.
+// The -open and -activate flags make the "Show" button open the dashboard.
 func sendMacOSNotification(title, message string) error {
-	cmd := exec.Command("terminal-notifier",
+	args := []string{
 		"-title", title,
 		"-message", message,
 		"-group", "com.ds3backup",
-	)
+	}
+	if dashboardURL != "" {
+		args = append(args, "-open", dashboardURL, "-activate", "com.apple.Safari")
+	}
+	cmd := exec.Command("terminal-notifier", args...)
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
