@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -259,11 +260,14 @@ func (t *TrayApp) handleMenuClicks() {
 			t.toggleScheduler()
 		case <-t.menuItems["quit"].item.ClickedCh:
 			log.Println("Quit requested from tray menu — shutting down daemon")
-			// Fire-and-forget: signal daemon to shut down.
-			// Use os.Exit(0) instead of systray.Quit() because systray calls
-			// into AppKit CGo which has thread affinity — calling Quit from a
-			// background goroutine is unreliable on macOS.
-			http.Post(t.apiBaseURL+"/api/v1/shutdown", "application/json", nil)
+			// Send SIGTERM to parent process (the daemon). Using OS signal avoids
+			// HTTP dependency and race between API response and tray process kill.
+			ppid := os.Getppid()
+			if err := syscall.Kill(ppid, syscall.SIGTERM); err != nil {
+				log.Printf("Failed to signal daemon (PID %d): %v", ppid, err)
+			}
+			// Use os.Exit(0) instead of systray.Quit() because AppKit CGo has thread
+			// affinity — calling Quit from a background goroutine is unreliable.
 			log.Println("Exiting tray")
 			os.Exit(0)
 		case <-t.menuItems["dashboard"].item.ClickedCh:
