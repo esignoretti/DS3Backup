@@ -140,6 +140,16 @@ Examples:
   ds3backup daemon start --no-tray
   ds3backup daemon start --port 9100`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Check if daemon already running before starting
+		if existingPID := readPID(); existingPID > 0 {
+			if isProcessRunning(existingPID) {
+				return fmt.Errorf("daemon already running (PID %d). Stop it first: ds3backup daemon stop", existingPID)
+			}
+			// Stale PID file from a crash — clean it up
+			removePIDFile()
+			log.Printf("Removed stale PID file for PID %d", existingPID)
+		}
+
 		// If not in foreground mode, fork to background (tray runs as subprocess)
 		if !daemonForeground {
 			execPath, err := os.Executable()
