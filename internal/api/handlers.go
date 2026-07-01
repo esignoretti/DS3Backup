@@ -39,6 +39,15 @@ func (s *APIServer) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
+func (s *APIServer) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "shutting_down"})
+	// Signal daemon to exit after responding to the HTTP request
+	// (so the tray subprocess gets the response before being killed)
+	go func() {
+		close(s.shutdownChan)
+	}()
+}
+
 func (s *APIServer) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	jobs := s.jobManager.GetAllJobs()
 	sanitized := make([]BackupJobWithStatus, 0, len(jobs))

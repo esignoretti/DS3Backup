@@ -258,10 +258,21 @@ Examples:
 
 	log.Printf("Daemon running on port %d", daemonPort)
 
-	// 8. Signal handling
+	// 8. Wait for shutdown signal or API shutdown request
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+
+	if apiServer != nil {
+		select {
+		case <-sigChan:
+			log.Println("Received shutdown signal")
+		case <-apiServer.ShutdownChannel():
+			log.Println("Received shutdown request via API")
+		}
+	} else {
+		<-sigChan
+		log.Println("Received shutdown signal")
+	}
 
 	// 9. Graceful shutdown (reverse order: tray -> API -> scheduler)
 	log.Println("Shutting down daemon...")

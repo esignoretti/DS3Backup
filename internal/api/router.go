@@ -14,6 +14,7 @@ func (s *APIServer) setupRouter() http.Handler {
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	mux.HandleFunc("POST /api/v1/start", s.handleStart)
 	mux.HandleFunc("POST /api/v1/stop", s.handleStop)
+	mux.HandleFunc("POST /api/v1/shutdown", s.handleShutdown)
 
 	// Job endpoints
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)

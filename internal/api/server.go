@@ -24,6 +24,7 @@ type APIServer struct {
 	server          *http.Server
 	mu              sync.RWMutex
 	startTime       time.Time
+	shutdownChan    chan struct{}
 }
 
 func NewAPIServer(port int, runner BackupRunner, jobManager JobManager, historyProvider HistoryProvider, restoreProvider RestoreProvider, logPath string) *APIServer {
@@ -34,7 +35,13 @@ func NewAPIServer(port int, runner BackupRunner, jobManager JobManager, historyP
 		historyProvider: historyProvider,
 		restoreProvider: restoreProvider,
 		logPath:         logPath,
+		shutdownChan:    make(chan struct{}),
 	}
+}
+
+// ShutdownChannel returns a channel that is closed when the daemon should exit.
+func (s *APIServer) ShutdownChannel() <-chan struct{} {
+	return s.shutdownChan
 }
 
 // Start sets up the HTTP server and begins listening on localhost only.

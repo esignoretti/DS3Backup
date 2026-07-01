@@ -257,7 +257,10 @@ func (t *TrayApp) handleMenuClicks() {
 		case <-t.menuItems["stopScheduler"].item.ClickedCh:
 			t.toggleScheduler()
 		case <-t.menuItems["quit"].item.ClickedCh:
-			log.Println("Quit requested from tray menu")
+			log.Println("Quit requested from tray menu — shutting down daemon")
+			// Fire-and-forget: signal daemon to shut down, then exit tray.
+			// Daemon's shutdown sequence handles killing this subprocess if still alive.
+			http.Post(t.apiBaseURL+"/api/v1/shutdown", "application/json", nil)
 			systray.Quit()
 		case <-t.menuItems["dashboard"].item.ClickedCh:
 			t.openDashboard()

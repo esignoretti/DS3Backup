@@ -37,7 +37,7 @@ func sendMacOSNotification(title, message string) error {
 		"-group", "com.ds3backup",
 	}
 	if dashboardURL != "" {
-		args = append(args, "-open", dashboardURL, "-activate", "com.apple.Safari")
+		args = append(args, "-open", dashboardURL)
 	}
 	cmd := exec.Command("terminal-notifier", args...)
 	if err := cmd.Run(); err == nil {
