@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/getlantern/systray"
 )
@@ -75,6 +74,7 @@ type TrayApp struct {
 	jobStatusItems map[string]*systray.MenuItem
 	runBackupItems map[string]*systray.MenuItem
 	state          TrayState
+	stateChan      chan TrayState
 }
 
 // NewTrayApp creates a new TrayApp connected to the daemon API on the given port.
@@ -86,36 +86,7 @@ func NewTrayApp(apiPort int) *TrayApp {
 		jobStatusItems: make(map[string]*systray.MenuItem),
 		runBackupItems: make(map[string]*systray.MenuItem),
 		state:          StateIdle,
-	}
-}
-
-// Run starts the system tray application in a goroutine with panic recovery.
-// Returns after 5s if the tray starts successfully, or immediately if it crashes.
-// NOTE: SIGTRAP/SIGSEGV from C/ObjC code cannot be caught by recover().
-// For crash isolation, use RunBlocking() in a subprocess instead.
-func (t *TrayApp) Run() error {
-	started := make(chan struct{})
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("CRASH: systray.Run panicked: %v", r)
-			}
-			close(started)
-		}()
-		systray.Run(t.onReady, t.onExit)
-	}()
-
-	select {
-	case <-started:
-		t.mu.Lock()
-		t.running = false
-		t.mu.Unlock()
-		return fmt.Errorf("systray exited or crashed")
-	case <-time.After(5 * time.Second):
-		t.mu.Lock()
-		t.running = true
-		t.mu.Unlock()
-		return nil
+		stateChan:      make(chan TrayState, 4),
 	}
 }
 
@@ -150,20 +121,13 @@ func (t *TrayApp) IsRunning() bool {
 }
 
 // SetState changes the tray icon to reflect the given state.
+// Safe to call from any goroutine — state changes are serialized via
+// stateChan and applied on the systray goroutine (AppKit thread affinity).
 func (t *TrayApp) SetState(state TrayState) {
-	t.mu.Lock()
-	t.state = state
-	t.mu.Unlock()
-	switch state {
-	case StateRunning:
-		systray.SetIcon(iconRunning)
-		systray.SetTooltip("DS3 Backup — Backup in progress")
-	case StateError:
-		systray.SetIcon(iconError)
-		systray.SetTooltip("DS3 Backup — Error")
+	select {
+	case t.stateChan <- state:
 	default:
-		systray.SetIcon(iconIdle)
-		systray.SetTooltip("DS3 Backup Daemon")
+		// Drop if channel full (consumer behind)
 	}
 }
 
@@ -174,6 +138,28 @@ func (t *TrayApp) onReady() {
 	systray.SetTooltip("DS3 Backup Daemon")
 
 	setupMenu(t)
+
+	// Apply state changes on the systray goroutine (AppKit thread affinity)
+	go func() {
+		for {
+			select {
+			case state := <-t.stateChan:
+				switch state {
+				case StateRunning:
+					systray.SetIcon(iconRunning)
+					systray.SetTooltip("DS3 Backup — Backup in progress")
+				case StateError:
+					systray.SetIcon(iconError)
+					systray.SetTooltip("DS3 Backup — Error")
+				default:
+					systray.SetIcon(iconIdle)
+					systray.SetTooltip("DS3 Backup Daemon")
+				}
+			case <-t.stopChan:
+				return
+			}
+		}
+	}()
 
 	log.Println("System tray ready")
 }
