@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/signal"
 	"sync"
 	"syscall"
 	"time"
@@ -17,54 +16,60 @@ type TraySubprocess struct {
 	cmd     *exec.Cmd
 	mu      sync.Mutex
 	running bool
+	exited  chan struct{}
 }
 
 // NewTraySubprocess creates a subprocess manager for the tray.
 func NewTraySubprocess(apiPort int) *TraySubprocess {
-	return &TraySubprocess{apiPort: apiPort}
+	return &TraySubprocess{
+		apiPort: apiPort,
+		exited:  make(chan struct{}),
+	}
 }
 
 // Start spawns the tray as a separate process. Returns nil if started successfully.
 // The subprocess runs "ds3backup tray start --port N".
 func (ts *TraySubprocess) Start() error {
 	ts.mu.Lock()
-	defer ts.mu.Unlock()
 
 	if ts.running {
+		ts.mu.Unlock()
 		return fmt.Errorf("tray subprocess already running")
 	}
 
 	execPath, err := os.Executable()
 	if err != nil {
+		ts.mu.Unlock()
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
 	args := []string{"tray", "start", "--port", fmt.Sprintf("%d", ts.apiPort)}
 	cmd := exec.Command(execPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = nil
+	cmd.Stderr = nil
 	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
+		ts.mu.Unlock()
 		return fmt.Errorf("failed to start tray subprocess: %w", err)
 	}
 
 	ts.cmd = cmd
 	ts.running = true
+	ts.mu.Unlock()
 
-	// Monitor subprocess in background
+	// Monitor subprocess in background — sole owner of cmd.Wait()
 	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("Tray subprocess exited: %v", err)
-		}
+		cmd.Wait()
+		close(ts.exited)
+	}()
+
+	// Give it a moment to start; check process is alive
+	time.Sleep(500 * time.Millisecond)
+	if cmd.Process == nil || cmd.Process.Signal(syscall.Signal(0)) != nil {
 		ts.mu.Lock()
 		ts.running = false
 		ts.mu.Unlock()
-	}()
-
-	// Give it a moment to start; check it's alive
-	time.Sleep(500 * time.Millisecond)
-	if !ts.IsRunning() {
 		return fmt.Errorf("tray subprocess failed to start")
 	}
 
@@ -75,32 +80,32 @@ func (ts *TraySubprocess) Start() error {
 // Stop sends SIGTERM to the tray subprocess and waits for it to exit.
 func (ts *TraySubprocess) Stop() {
 	ts.mu.Lock()
-	defer ts.mu.Unlock()
-
 	if !ts.running || ts.cmd == nil || ts.cmd.Process == nil {
+		ts.mu.Unlock()
 		return
 	}
+	pid := ts.cmd.Process.Pid
+	ts.mu.Unlock()
 
-	log.Printf("Stopping tray subprocess (PID: %d)...", ts.cmd.Process.Pid)
+	log.Printf("Stopping tray subprocess (PID: %d)...", pid)
+
 	if err := ts.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		log.Printf("Failed to signal tray subprocess: %v", err)
 		ts.cmd.Process.Kill()
 	}
 
-	// Wait up to 3 seconds for clean exit
-	done := make(chan struct{})
-	go func() {
-		ts.cmd.Wait()
-		close(done)
-	}()
+	// Wait for monitor goroutine to confirm exit
 	select {
-	case <-done:
+	case <-ts.exited:
 	case <-time.After(3 * time.Second):
 		log.Println("Tray subprocess did not exit in time, killing")
 		ts.cmd.Process.Kill()
+		<-ts.exited
 	}
 
+	ts.mu.Lock()
 	ts.running = false
+	ts.mu.Unlock()
 	log.Println("Tray subprocess stopped")
 }
 
@@ -116,10 +121,4 @@ func (ts *TraySubprocess) IsRunning() bool {
 	return ts.cmd.Process.Signal(syscall.Signal(0)) == nil
 }
 
-// WaitForShutdown blocks until SIGINT/SIGTERM is received.
-// Intended for use by the tray subprocess itself.
-func WaitForShutdown() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-}
+
