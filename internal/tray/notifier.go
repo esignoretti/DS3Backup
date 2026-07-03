@@ -5,6 +5,7 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 func init() {
@@ -57,8 +58,16 @@ func sendMacOSNotification(title, message string) error {
 	if dashboardURL != "" {
 		msg = message + " — " + dashboardURL
 	}
-	script := fmt.Sprintf(`display notification "%s" with title "%s"`, msg, title)
+	msg = escapeOsascript(msg)
+	escTitle := escapeOsascript(title)
+	script := fmt.Sprintf(`display notification "%s" with title "%s"`, msg, escTitle)
 	return exec.Command("osascript", "-e", script).Run()
+}
+
+func escapeOsascript(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	return s
 }
 
 // sendLinuxNotification sends a notification via notify-send.
