@@ -199,34 +199,58 @@ func DeserializeEncryptedFile(data []byte) (*EncryptedFile, error) {
 	if len(data) < 20 {
 		return nil, errors.New("data too short")
 	}
-	
+
 	idx := 0
-	
+
+	if idx+1 > len(data) {
+		return nil, errors.New("truncated: nonce length")
+	}
 	nonceLen := int(data[idx])
 	idx++
+	if idx+nonceLen > len(data) {
+		return nil, errors.New("truncated: nonce data")
+	}
 	nonce := data[idx : idx+nonceLen]
 	idx += nonceLen
-	
+
+	if idx+1 > len(data) {
+		return nil, errors.New("truncated: hash length")
+	}
 	hashLen := int(data[idx])
 	idx++
+	if idx+hashLen > len(data) {
+		return nil, errors.New("truncated: hash data")
+	}
 	hash := data[idx : idx+hashLen]
 	idx += hashLen
-	
+
+	if idx+8 > len(data) {
+		return nil, errors.New("truncated: original size")
+	}
 	origSize := int64(uint64(data[idx])<<56 | uint64(data[idx+1])<<48 | uint64(data[idx+2])<<40 | uint64(data[idx+3])<<32 |
 		uint64(data[idx+4])<<24 | uint64(data[idx+5])<<16 | uint64(data[idx+6])<<8 | uint64(data[idx+7]))
 	idx += 8
-	
+
+	if idx+8 > len(data) {
+		return nil, errors.New("truncated: compressed size")
+	}
 	compSize := int64(uint64(data[idx])<<56 | uint64(data[idx+1])<<48 | uint64(data[idx+2])<<40 | uint64(data[idx+3])<<32 |
 		uint64(data[idx+4])<<24 | uint64(data[idx+5])<<16 | uint64(data[idx+6])<<8 | uint64(data[idx+7]))
 	idx += 8
-	
+
+	if idx+1 > len(data) {
+		return nil, errors.New("truncated: tag length")
+	}
 	tagLen := int(data[idx])
 	idx++
+	if idx+tagLen > len(data) {
+		return nil, errors.New("truncated: tag data")
+	}
 	tag := data[idx : idx+tagLen]
 	idx += tagLen
-	
+
 	ciphertext := data[idx:]
-	
+
 	return &EncryptedFile{
 		Nonce:          nonce,
 		Ciphertext:     ciphertext,
