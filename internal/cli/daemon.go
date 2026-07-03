@@ -684,8 +684,12 @@ Sends a shutdown signal to the daemon via the local API or directly via signal.`
 		)
 		if err == nil {
 			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Daemon API response: %s\n", string(body))
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Printf("Warning: partial API response: %v\n", err)
+			} else {
+				fmt.Printf("Daemon API response: %s\n", string(body))
+			}
 			return nil
 		}
 

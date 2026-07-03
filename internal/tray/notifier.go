@@ -6,25 +6,36 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
-func init() {
-	// Warn if terminal-notifier is missing — without it "Show" button opens Finder
-	if _, err := exec.LookPath("terminal-notifier"); err != nil {
-		log.Println("TIP: Install terminal-notifier for actionable notifications: brew install terminal-notifier")
-	}
-}
-
-var dashboardURL string
+var (
+	dashboardURL atomic.Value // stores string
+	checkTNOnce sync.Once
+)
 
 // SetDashboardURL configures the URL that notification "Show" buttons open.
 // Should be called before any notification is sent (e.g., from daemon startup).
 func SetDashboardURL(url string) {
-	dashboardURL = url
+	dashboardURL.Store(url)
+}
+
+func getDashboardURL() string {
+	v := dashboardURL.Load()
+	if v == nil {
+		return ""
+	}
+	return v.(string)
 }
 
 // SendNotification sends a desktop notification using platform-specific APIs.
 func SendNotification(title, message string) error {
+	checkTNOnce.Do(func() {
+		if _, err := exec.LookPath("terminal-notifier"); err != nil {
+			log.Println("TIP: Install terminal-notifier for actionable notifications: brew install terminal-notifier")
+		}
+	})
 	switch runtime.GOOS {
 	case "darwin":
 		return sendMacOSNotification(title, message)
@@ -41,13 +52,14 @@ func SendNotification(title, message string) error {
 // With terminal-notifier, -open sets the "Show" button to open the dashboard.
 // Without it, osascript's notification always opens Finder — no way to override.
 func sendMacOSNotification(title, message string) error {
+	url := getDashboardURL()
 	args := []string{
 		"-title", title,
 		"-message", message,
 		"-group", "com.ds3backup",
 	}
-	if dashboardURL != "" {
-		args = append(args, "-open", dashboardURL)
+	if url != "" {
+		args = append(args, "-open", url)
 	}
 	cmd := exec.Command("terminal-notifier", args...)
 	if err := cmd.Run(); err == nil {
@@ -55,8 +67,8 @@ func sendMacOSNotification(title, message string) error {
 	}
 	// osascript: embed URL in message since "Show" button can't be customized
 	msg := message
-	if dashboardURL != "" {
-		msg = message + " — " + dashboardURL
+	if url != "" {
+		msg = message + " — " + url
 	}
 	msg = escapeOsascript(msg)
 	escTitle := escapeOsascript(title)

@@ -322,7 +322,11 @@ func (t *TrayApp) openDashboard() {
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("Failed to open dashboard: %v", err)
+		return
 	}
+	go func() {
+		cmd.Wait()
+	}()
 }
 
 // queryJobs fetches the list of jobs from the API.
