@@ -153,9 +153,31 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 			// Small file: add to batch
 			uniqueFiles[i].IsInBatch = true
 			uniqueFiles[i].CompressedSize = encrypted.CompressedSize
-			
-			batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
-			
+
+			ok, err := batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
+			if err != nil {
+				log.Printf("WARNING: Failed to add %s to batch: %v", entry.Path, err)
+				run.FilesFailed++
+				continue
+			}
+			if !ok {
+				// Batch full — flush it, then start fresh batch with this file
+				var flushErr error
+				batchBuilder, flushErr = e.flushBatch(ctx, batchBuilder, job, uniqueFiles, run)
+				if flushErr != nil {
+					log.Printf("WARNING: Failed to flush batch: %v", flushErr)
+					run.FilesFailed++
+					continue
+				}
+				// Re-add current file to new batch
+				ok, err = batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
+				if err != nil || !ok {
+					log.Printf("WARNING: Failed to re-add %s to fresh batch: %v", entry.Path, err)
+					run.FilesFailed++
+					continue
+				}
+			}
+
 			// Count batched files as added (will be uploaded with batch)
 			run.FilesAdded++
 			run.BytesUploaded += entry.Size
@@ -174,35 +196,11 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	}
 
 	// Step 5: Upload remaining batch
-	if batchBuilder.FileCount() > 0 {
-		manifest, err := batchBuilder.Upload(ctx, e.s3client, job.ObjectLockMode, job.RetentionDays)
-		if err != nil {
-			log.Printf("WARNING: Final batch upload failed: %v", err)
-			run.IndexSyncFailed = true
-		} else {
-			run.BatchesUploaded++
-			// Update S3 keys and offsets for files in this batch
-			batchS3Key := fmt.Sprintf("backups/%s/batches/%s.enc", job.ID, manifest.BatchID)
-			
-			// Create a map from path to manifest file ref
-			fileRefMap := make(map[string]*models.BatchFileRef)
-			for i := range manifest.Files {
-				fileRefMap[manifest.Files[i].Path] = &manifest.Files[i]
-			}
-			
-			for i := range uniqueFiles {
-				if uniqueFiles[i].IsInBatch && uniqueFiles[i].S3Key == "" {
-					uniqueFiles[i].S3Key = batchS3Key
-					uniqueFiles[i].BatchID = manifest.BatchID
-					
-					// Get offset and length from manifest
-					if ref, ok := fileRefMap[uniqueFiles[i].Path]; ok {
-						uniqueFiles[i].OffsetInBatch = ref.OffsetInBatch
-						uniqueFiles[i].LengthInBatch = ref.LengthInBatch
-					}
-				}
-			}
-		}
+	var flushErr error
+	batchBuilder, flushErr = e.flushBatch(ctx, batchBuilder, job, uniqueFiles, run)
+	if flushErr != nil {
+		log.Printf("WARNING: Final batch upload failed: %v", flushErr)
+		run.IndexSyncFailed = true
 	}
 	
 	// Save ALL entries to index (including duplicates)
@@ -254,6 +252,41 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 	log.Printf("Backup completed: %d files added, %s uploaded", run.FilesAdded, util.FormatBytes(run.BytesUploaded))
 
 	return run, nil
+}
+
+// flushBatch uploads the current batch and returns a fresh BatchBuilder.
+// It updates uniqueFiles entries with S3 keys and offsets from the manifest.
+func (e *BackupEngine) flushBatch(ctx context.Context, batchBuilder *s3client.BatchBuilder, job *models.BackupJob, uniqueFiles []models.FileEntry, run *models.BackupRun) (*s3client.BatchBuilder, error) {
+	if batchBuilder.FileCount() == 0 {
+		return s3client.NewBatchBuilder(s3client.DefaultBatchConfig, job.ID), nil
+	}
+
+	manifest, err := batchBuilder.Upload(ctx, e.s3client, job.ObjectLockMode, job.RetentionDays)
+	if err != nil {
+		return nil, fmt.Errorf("batch upload: %w", err)
+	}
+
+	run.BatchesUploaded++
+	batchS3Key := fmt.Sprintf("backups/%s/batches/%s.enc", job.ID, manifest.BatchID)
+
+	fileRefMap := make(map[string]*models.BatchFileRef)
+	for i := range manifest.Files {
+		fileRefMap[manifest.Files[i].Path] = &manifest.Files[i]
+	}
+
+	for i := range uniqueFiles {
+		if uniqueFiles[i].IsInBatch && uniqueFiles[i].S3Key == "" {
+			uniqueFiles[i].S3Key = batchS3Key
+			uniqueFiles[i].BatchID = manifest.BatchID
+
+			if ref, ok := fileRefMap[uniqueFiles[i].Path]; ok {
+				uniqueFiles[i].OffsetInBatch = ref.OffsetInBatch
+				uniqueFiles[i].LengthInBatch = ref.LengthInBatch
+			}
+		}
+	}
+
+	return s3client.NewBatchBuilder(s3client.DefaultBatchConfig, job.ID), nil
 }
 
 // syncIndexToS3 uploads the local index to S3
