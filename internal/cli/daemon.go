@@ -723,6 +723,7 @@ func init() {
 	daemonRunCmd.Flags().BoolVar(&daemonNoAPI, "no-api", false, "Start scheduler without API server")
 	daemonRunCmd.Flags().BoolVar(&daemonNoTray, "no-tray", false, "Start in headless mode (no system tray)")
 	daemonRunCmd.Flags().BoolVar(&daemonForeground, "foreground", false, "Run in foreground (used internally)")
+	daemonRunCmd.Flags().MarkHidden("foreground")
 
 	// Flags on daemonStatusCmd
 	daemonStatusCmd.Flags().IntVar(&daemonPort, "port", 0, "API server port (default: from config or 8099)")
