@@ -146,8 +146,3 @@ func saveConfig(cfg *config.Config) error {
 func IsVerbose() bool {
 	return verbose
 }
-
-// GetLogFile returns the log file
-func GetLogFile() *os.File {
-	return logFile
-}

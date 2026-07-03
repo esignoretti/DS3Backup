@@ -73,7 +73,6 @@ type TrayApp struct {
 	stopChan       chan struct{}
 	jobStatusItems map[string]*systray.MenuItem
 	runBackupItems map[string]*systray.MenuItem
-	state          TrayState
 	stateChan      chan TrayState
 }
 
@@ -85,7 +84,6 @@ func NewTrayApp(apiPort int) *TrayApp {
 		stopChan:       make(chan struct{}),
 		jobStatusItems: make(map[string]*systray.MenuItem),
 		runBackupItems: make(map[string]*systray.MenuItem),
-		state:          StateIdle,
 		stateChan:      make(chan TrayState, 4),
 	}
 }
