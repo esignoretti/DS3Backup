@@ -15,14 +15,6 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-// DownloadJob represents a single file download task
-type DownloadJob struct {
-	Entry    *models.FileEntry
-	DestPath string
-	IsBatch  bool
-	BatchID  string
-}
-
 // DownloadResult represents the result of a download job
 type DownloadResult struct {
 	Entry    *models.FileEntry
@@ -38,7 +30,7 @@ type DownloadResult struct {
 // DownloaderV2 manages parallel file downloads with resume support
 type DownloaderV2 struct {
 	workers       int
-	jobQueue      chan *DownloadJob
+	jobQueue      chan *Job
 	resultChan    chan *DownloadResult
 	wg            sync.WaitGroup
 	crypto        *crypto.CryptoEngine
@@ -48,7 +40,7 @@ type DownloaderV2 struct {
 	state         *RestoreState
 	stateDir      string
 	maxRetries    int
-	retryDelay    int // seconds
+	retryDelay    time.Duration
 	mu            sync.Mutex
 }
 
@@ -66,7 +58,7 @@ func NewDownloaderV2(
 ) *DownloaderV2 {
 	return &DownloaderV2{
 		workers:    workers,
-		jobQueue:   make(chan *DownloadJob, workers*2),
+		jobQueue:   make(chan *Job, workers*2),
 		resultChan: make(chan *DownloadResult, workers*2),
 		crypto:     cryptoEngine,
 		s3client:   s3client,
@@ -75,7 +67,7 @@ func NewDownloaderV2(
 		state:      state,
 		stateDir:   stateDir,
 		maxRetries: maxRetries,
-		retryDelay: retryDelay,
+		retryDelay: time.Duration(retryDelay) * time.Second,
 	}
 }
 
@@ -95,7 +87,7 @@ func (d *DownloaderV2) Stop() {
 }
 
 // Submit submits a job to the queue
-func (d *DownloaderV2) Submit(job *DownloadJob) {
+func (d *DownloaderV2) Submit(job *Job) {
 	d.jobQueue <- job
 }
 
@@ -115,65 +107,39 @@ func (d *DownloaderV2) worker() {
 }
 
 // processJobWithRetry processes a job with retry logic
-func (d *DownloaderV2) processJobWithRetry(job *DownloadJob) *DownloadResult {
-	var lastResult *DownloadResult
-	
+func (d *DownloaderV2) processJobWithRetry(job *Job) *DownloadResult {
 	for attempt := 0; attempt <= d.maxRetries; attempt++ {
 		result := d.processJob(job)
-		lastResult = result
-		
+
 		if result.Success || result.Skipped {
 			return result
 		}
-		
-		// Don't retry certain errors
-		if d.isNonRetryableError(result.Error) {
-			return result
+
+		if result.Error != nil {
+			errStr := result.Error.Error()
+			if strings.Contains(errStr, "hash verification failed") ||
+				strings.Contains(errStr, "decryption failed") ||
+				strings.Contains(errStr, "permission denied") ||
+				strings.Contains(errStr, "deserialization failed") {
+				return result
+			}
 		}
-		
-		// Wait before retry (exponential backoff)
+
 		if attempt < d.maxRetries {
-			delay := d.retryDelay * (1 << uint(attempt)) // 1s, 2s, 4s, ...
 			select {
-			case <-time.After(time.Duration(delay) * time.Second):
-				// Continue to next attempt
+			case <-time.After(d.retryDelay):
 			case <-d.ctx.Done():
 				result.Error = fmt.Errorf("cancelled: %w", d.ctx.Err())
 				return result
 			}
 		}
 	}
-	
-	return lastResult
-}
 
-// isNonRetryableError checks if an error should not be retried
-func (d *DownloaderV2) isNonRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	
-	errStr := err.Error()
-	// Don't retry: hash mismatches, decryption failures, permission errors
-	return containsAny(errStr, []string{
-		"hash verification failed",
-		"decryption failed",
-		"permission denied",
-		"deserialization failed",
-	})
-}
-
-func containsAny(s string, substrings []string) bool {
-	for _, sub := range substrings {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
+	return &DownloadResult{}
 }
 
 // processJob handles a single download job
-func (d *DownloaderV2) processJob(job *DownloadJob) *DownloadResult {
+func (d *DownloaderV2) processJob(job *Job) *DownloadResult {
 	result := &DownloadResult{
 		Entry:    job.Entry,
 		DestPath: job.DestPath,

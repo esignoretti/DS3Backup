@@ -425,7 +425,7 @@ func (e *RestoreEngine) ResumeRestore(
 			BatchID:   fileState.BatchID,
 		}
 		
-		job := &DownloadJob{
+		job := &Job{
 			Entry:    entry,
 			DestPath: fileState.Path,
 			IsBatch:  fileState.BatchID != "",
