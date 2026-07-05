@@ -119,10 +119,7 @@ func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword s
 
 	// Step 8: Discover jobs
 	fmt.Println("\nStep 8: Discovering backup jobs...")
-	jobs, err := discoverJobsFromConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to discover jobs: %w", err)
-	}
+	jobs := cfg.Jobs
 
 	if len(jobs) == 0 {
 		fmt.Println("  ⚠️  No backup jobs found")
@@ -142,11 +139,6 @@ func RunRebuild(ctx context.Context, s3client *s3client.Client, masterPassword s
 	fmt.Println("  ds3backup restore <job-id>      # Restore files")
 
 	return nil
-}
-
-// discoverJobsFromConfig extracts job information from loaded config
-func discoverJobsFromConfig(cfg *config.Config) ([]models.BackupJob, error) {
-	return cfg.Jobs, nil
 }
 
 // LoadEncryptionSalt downloads the encryption salt from S3

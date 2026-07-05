@@ -163,20 +163,6 @@ func (s *RestoreState) GetFailedFiles() []*FileState {
 	return failed
 }
 
-// GetPendingFiles returns files that haven't been restored yet
-func (s *RestoreState) GetPendingFiles() []*FileState {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	
-	var pending []*FileState
-	for _, file := range s.Files {
-		if file.Status == "pending" || file.Status == "downloading" {
-			pending = append(pending, file)
-		}
-	}
-	return pending
-}
-
 // GetIncompleteFiles returns files that are not completed or skipped
 func (s *RestoreState) GetIncompleteFiles() []*FileState {
 	s.mu.Lock()
@@ -370,7 +356,4 @@ func GetStateDirectory(jobID, sessionID, configDir string) string {
 	return filepath.Join(configDir, "state", jobID, sessionID)
 }
 
-// GetPartialDirectory returns the partial files directory
-func GetPartialDirectory(stateDir string) string {
-	return filepath.Join(stateDir, "partial")
-}
+

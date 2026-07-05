@@ -12,18 +12,6 @@ type RestoreOptions struct {
 	Concurrency     int       // Number of parallel workers (default: 8)
 	TargetTime      time.Time // Restore from specific backup run time (zero = latest)
 }
-
-// RestoreProgress holds progress information during restore
-type RestoreProgress struct {
-	Percent       int
-	FilesRestored int
-	TotalFiles    int
-	BytesRestored int64
-	CurrentFile   string
-	Status        string // "downloading", "decrypting", "writing", "skipped", "failed"
-	SpeedMBps     float64
-}
-
 // RestoreResult holds the final restore results
 type RestoreResult struct {
 	FilesRestored int

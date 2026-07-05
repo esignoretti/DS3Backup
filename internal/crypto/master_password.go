@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -164,8 +163,3 @@ func VerifyMasterPasswordChecksum(encryptedChecksum, masterPassword string) (boo
 	return string(decrypted) == expected, nil
 }
 
-// HashPassword creates a SHA256 hash of password for comparison
-func HashPassword(password string) string {
-	hash := sha256.Sum256([]byte(password))
-	return base64.StdEncoding.EncodeToString(hash[:])
-}
