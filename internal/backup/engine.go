@@ -154,12 +154,7 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 			uniqueFiles[i].IsInBatch = true
 			uniqueFiles[i].CompressedSize = encrypted.CompressedSize
 
-			ok, err := batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
-			if err != nil {
-				log.Printf("WARNING: Failed to add %s to batch: %v", entry.Path, err)
-				run.FilesFailed++
-				continue
-			}
+			ok := batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
 			if !ok {
 				// Batch full — flush it, then start fresh batch with this file
 				var flushErr error
@@ -170,9 +165,9 @@ func (e *BackupEngine) RunBackup(job *models.BackupJob, fullBackup bool, progres
 					continue
 				}
 				// Re-add current file to new batch
-				ok, err = batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
-				if err != nil || !ok {
-					log.Printf("WARNING: Failed to re-add %s to fresh batch: %v", entry.Path, err)
+				ok = batchBuilder.AddFile(entry.Path, entry.Hash, serialized)
+				if !ok {
+					log.Printf("WARNING: Failed to re-add %s to fresh batch", entry.Path)
 					run.FilesFailed++
 					continue
 				}

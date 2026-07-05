@@ -55,11 +55,11 @@ func NewBatchBuilder(config BatchConfig, jobID string) *BatchBuilder {
 }
 
 // AddFile adds a file to the batch
-func (b *BatchBuilder) AddFile(path string, hash []byte, data []byte) (bool, error) {
+func (b *BatchBuilder) AddFile(path string, hash []byte, data []byte) bool {
 	// Check if batch would exceed limits
 	if len(b.files) >= b.config.MaxBatchFiles ||
 		b.currentSize+int64(len(data)) > b.config.MaxBatchSize {
-		return false, nil // Batch is full
+		return false // Batch is full
 	}
 
 	entry := BatchFileEntry{
@@ -74,7 +74,7 @@ func (b *BatchBuilder) AddFile(path string, hash []byte, data []byte) (bool, err
 	b.files = append(b.files, entry)
 	b.currentSize += entry.Length
 
-	return true, nil
+	return true
 }
 
 // IsReady checks if batch should be uploaded
