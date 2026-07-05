@@ -14,6 +14,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/config"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/internal/util"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -71,7 +72,7 @@ var indexShowCmd = &cobra.Command{
 			fmt.Printf("  Files added: %d\n", lastRun.FilesAdded)
 			fmt.Printf("  Files changed: %d\n", lastRun.FilesChanged)
 			fmt.Printf("  Files skipped: %d\n", lastRun.FilesSkipped)
-			fmt.Printf("  Bytes uploaded: %s\n", formatBytes(lastRun.BytesUploaded))
+			fmt.Printf("  Bytes uploaded: %s\n", util.FormatBytes(lastRun.BytesUploaded))
 			fmt.Printf("  Duration: %s\n", lastRun.Duration)
 			
 			if lastRun.IndexSyncFailed {

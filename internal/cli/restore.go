@@ -15,6 +15,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/restore"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/internal/util"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -237,7 +238,7 @@ func runDryRun(engine *restore.RestoreEngine, jobID string, opts *models.Restore
 
 	fmt.Printf("Files to restore: %d\n", result.FilesToRestore)
 	fmt.Printf("Files to skip (already exist): %d\n", result.FilesSkipped)
-	fmt.Printf("Total size: %s\n", formatBytes(result.TotalSize))
+	fmt.Printf("Total size: %s\n", util.FormatBytes(result.TotalSize))
 	
 	// Estimate time (rough estimate at 10 MB/s)
 	estimatedSeconds := float64(result.TotalSize) / 10 / 1024 / 1024
@@ -251,7 +252,7 @@ func runDryRun(engine *restore.RestoreEngine, jobID string, opts *models.Restore
 	if len(result.SampleFiles) > 0 {
 		fmt.Println("Sample files:")
 		for _, f := range result.SampleFiles {
-			fmt.Printf("  - %s (%s)\n", f.Path, formatBytes(f.Size))
+			fmt.Printf("  - %s (%s)\n", f.Path, util.FormatBytes(f.Size))
 		}
 		if result.MoreFiles > 0 {
 			fmt.Printf("  ... (%d more files)\n", result.MoreFiles)
@@ -282,7 +283,7 @@ func runDryRunWithEntries(engine *restore.RestoreEngine, jobID string, opts *mod
 
 	fmt.Printf("Files to restore: %d\n", filesToRestore)
 	fmt.Printf("Files to skip (already exist): %d\n", filesToSkip)
-	fmt.Printf("Total size: %s\n", formatBytes(totalSize))
+	fmt.Printf("Total size: %s\n", util.FormatBytes(totalSize))
 	
 	// Estimate time
 	estimatedSeconds := float64(totalSize) / 10 / 1024 / 1024
@@ -301,7 +302,7 @@ func runDryRunWithEntries(engine *restore.RestoreEngine, jobID string, opts *mod
 			fmt.Printf("  ... (%d more files)\n", len(entries)-sampleCount)
 			break
 		}
-		fmt.Printf("  - %s (%s)\n", entry.Path, formatBytes(entry.Size))
+		fmt.Printf("  - %s (%s)\n", entry.Path, util.FormatBytes(entry.Size))
 		sampleCount++
 	}
 
@@ -362,8 +363,8 @@ func displayRestoreResult(result *models.RestoreResult) error {
 	if result.FilesFailed > 0 {
 		fmt.Printf("   Files failed: %d\n", result.FilesFailed)
 	}
-	fmt.Printf("   Bytes restored: %s\n", formatBytes(result.BytesRestored))
-	fmt.Printf("   Duration: %s\n", formatDuration(time.Duration(result.Duration)*time.Second))
+	fmt.Printf("   Bytes restored: %s\n", util.FormatBytes(result.BytesRestored))
+	fmt.Printf("   Duration: %s\n", util.FormatDuration(time.Duration(result.Duration)*time.Second))
 
 	if len(result.Warnings) > 0 {
 		fmt.Printf("   ⚠️  Metadata warnings: %d\n", len(result.Warnings))
@@ -524,7 +525,7 @@ var restoreResumeCmd = &cobra.Command{
 
 		fmt.Printf("   Status: %s\n", state.Status)
 		fmt.Printf("   Progress: %d/%d files, %s restored\n", 
-			state.ProcessedFiles, state.TotalFiles, formatBytes(state.BytesRestored))
+			state.ProcessedFiles, state.TotalFiles, util.FormatBytes(state.BytesRestored))
 		fmt.Println()
 
 		// Determine which files to restore
@@ -597,8 +598,8 @@ var restoreResumeCmd = &cobra.Command{
 		if result.FilesFailed > 0 {
 			fmt.Printf("   Files failed: %d\n", result.FilesFailed)
 		}
-		fmt.Printf("   Bytes restored: %s\n", formatBytes(result.BytesRestored))
-		fmt.Printf("   Duration: %s\n", formatDuration(time.Duration(result.Duration)*time.Second))
+		fmt.Printf("   Bytes restored: %s\n", util.FormatBytes(result.BytesRestored))
+		fmt.Printf("   Duration: %s\n", util.FormatDuration(time.Duration(result.Duration)*time.Second))
 
 		return nil
 	},
@@ -635,7 +636,7 @@ var restoreStatusCmd = &cobra.Command{
 			state.ProcessedFiles, state.TotalFiles,
 			state.ProcessedFiles*100/state.TotalFiles)
 		fmt.Printf("Bytes Restored: %s / %s\n", 
-			formatBytes(state.BytesRestored), formatBytes(state.BytesTotal))
+			util.FormatBytes(state.BytesRestored), util.FormatBytes(state.BytesTotal))
 		fmt.Printf("Speed: %.2f MB/s\n", state.SpeedMBps)
 		fmt.Println()
 

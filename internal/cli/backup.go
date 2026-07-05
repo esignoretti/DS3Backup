@@ -17,6 +17,7 @@ import (
 	"github.com/esignoretti/ds3backup/internal/crypto"
 	"github.com/esignoretti/ds3backup/internal/index"
 	"github.com/esignoretti/ds3backup/internal/s3client"
+	"github.com/esignoretti/ds3backup/internal/util"
 	"github.com/esignoretti/ds3backup/pkg/models"
 )
 
@@ -125,7 +126,7 @@ Example:
 					progress.Percent,
 					progress.FilesProcessed,
 					progress.TotalFiles,
-					formatBytes(progress.BytesUploaded))
+					util.FormatBytes(progress.BytesUploaded))
 			}
 		})
 
@@ -157,7 +158,7 @@ Example:
 					fmt.Printf("   Files failed: %d\n", run.FilesFailed)
 				}
 				fmt.Printf("   Batches uploaded: %d\n", run.BatchesUploaded)
-				fmt.Printf("   Bytes uploaded: %s\n", formatBytes(run.BytesUploaded))
+				fmt.Printf("   Bytes uploaded: %s\n", util.FormatBytes(run.BytesUploaded))
 				fmt.Printf("   Duration: %s\n", run.Duration)
 
 				if run.IndexSyncFailed {
@@ -335,8 +336,8 @@ func displayBackupTable(runs []*models.BackupRun) error {
 		timestamp := run.RunTime.Format("2006-01-02 15:04:05")
 		status := run.Status
 		files := formatBackupFiles(run)
-		size := formatBytes(run.BytesUploaded)
-		duration := formatDuration(run.Duration)
+		size := util.FormatBytes(run.BytesUploaded)
+		duration := util.FormatDuration(run.Duration)
 
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			timestamp, status, files, size, duration)
